@@ -1,0 +1,158 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>KnowledgeHub | منصة المعرفة</title>
+<style>
+:root{font-family:system-ui,"Segoe UI",sans-serif;color:#e9ecf6;background:#0b1020}*{box-sizing:border-box}body{margin:0}header{display:flex;justify-content:space-between;align-items:center;padding:18px 30px;border-bottom:1px solid #26304c;background:#11182b}h1{margin:0;font-size:23px}small,.muted{color:#9aa9c6}.brand{color:#9cafff}.shell{display:grid;grid-template-columns:250px 1fr;min-height:calc(100vh - 73px)}aside{padding:24px;background:#10182b;border-left:1px solid #26304c}main{padding:35px;max-width:1200px;width:100%;margin:auto}.panel{background:#151e33;border:1px solid #2b3755;border-radius:16px;padding:24px;margin-bottom:20px}input,textarea,select,button{font:inherit;border-radius:9px;padding:12px;border:1px solid #394867}input,textarea,select{background:#0d1529;color:white;width:100%;margin:7px 0}label{display:block;margin-top:12px;color:#dae2f8}h3{margin-top:20px}.muted{color:#a9b7d2}.stats{display:flex;gap:10px;flex-wrap:wrap}.stat{border:1px solid #354466;background:#13213a;border-radius:9px;padding:8px 12px}.hint{color:#a9b7d2;font-size:13px}textarea{min-height:150px}button{background:#647df5;color:white;cursor:pointer;border:0;margin:5px 0}button.alt{background:#253351}button:disabled{opacity:.5}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px}.item{padding:17px;background:#1a2640;border:1px solid #354466;border-radius:12px;cursor:pointer}#notice{color:#b9ccff;min-height:25px}.hidden{display:none}nav button{display:block;width:100%;text-align:right;margin:10px 0}.top{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.tag{font-size:12px;padding:5px 10px;background:#24365b;border-radius:20px}@media(max-width:750px){.shell{grid-template-columns:1fr}aside{border-left:0}main{padding:16px}} </style></head><body>
+<header><h1>◈ <span class="brand">KnowledgeHub</span> <small>منصة المعرفة الذكية</small></h1><div class="top"><span id="user"></span><button class="alt hidden" id="logout" onclick="signout()">خروج</button></div></header>
+<div class="shell"><aside><h3>مساحة العمل</h3><nav><button class="alt" onclick="show('home')">الرئيسية</button><button class="alt" onclick="show('docs')">المستندات</button><button class="alt" onclick="show('ai')">البحث الذكي</button><button class="alt" onclick="show('decisions');loadDecisions()">أثر القرارات</button><button class="alt" onclick="show('transfer');loadTransfers()">نقل المعرفة</button><button class="alt" onclick="show('skills');loadSkills()">فجوات المهارات</button></nav><p class="muted">مبني على مشروع إدارة المعرفة المستخرج من Drive. لا توجد بيانات تجريبية مستوردة.</p></aside><main><p id="notice"></p>
+<section id="auth" class="panel"><h2>تسجيل الدخول / إنشاء حساب</h2><input id="name" placeholder="الاسم الكامل (للحساب الجديد)"><input id="email" type="email" placeholder="البريد الإلكتروني"><input id="password" type="password" placeholder="كلمة المرور"><div class="top"><button onclick="authenticate(false)">دخول</button><button class="alt" onclick="authenticate(true)">إنشاء حساب</button></div></section>
+<section id="home" class="hidden"><div class="panel"><h2>مساحات العمل</h2><div class="top"><input id="wsname" placeholder="اسم مساحة عمل جديدة"><input id="wsslug" placeholder="معرّف فريد بالإنجليزية"><button onclick="createWS()">إنشاء مساحة</button></div></div><div id="workspaces" class="grid"></div></section>
+<section id="docs" class="hidden"><div class="panel"><h2>المستندات</h2><p id="current" class="muted">اختر مساحة عمل من الرئيسية</p><input id="doctitle" placeholder="عنوان المستند"><textarea id="doccontent" placeholder="محتوى المستند"></textarea><button onclick="createDoc()">حفظ مستند جديد</button></div><div id="documents" class="grid"></div></section>
+<section id="ai" class="hidden"><div class="panel"><h2>Corporate Brain — البحث الموثق</h2><p class="muted">يتطلب مساحة عمل تحتوي على مستندات. الإجابات المعتمدة على نموذج خارجي تحتاج إعداد مفتاح API.</p><input id="query" placeholder="اكتب سؤالك"><button onclick="searchDocs()">اسأل مستندات المؤسسة</button><pre id="results" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></div></section>
+<section id="decisions" class="hidden"><div class="panel"><h2>ذاكرة القرارات وقياس أثرها</h2><p class="muted">اختر مساحة عمل من الرئيسية أولاً</p><input id="decisiontitle" placeholder="عنوان القرار"><textarea id="decisionproblem" placeholder="المشكلة التي يعالجها القرار"></textarea><textarea id="decisionreason" placeholder="مبررات اتخاذ القرار"></textarea><button onclick="createDecision()">إضافة قرار</button></div><div id="decisionlist" class="grid"></div><div id="decisiondetail" class="panel hidden"><h3 id="decisionname"></h3><input id="metricname" placeholder="اسم المؤشر (مثلاً زمن الإنجاز)"><input id="metricunit" placeholder="الوحدة (دقيقة / ريال / نسبة)"><select id="metricdirection" style="padding:12px;background:#0d1529;color:white"><option value="decrease">الانخفاض أفضل</option><option value="increase">الارتفاع أفضل</option></select><input id="metricbaseline" type="number" step="any" placeholder="القيمة قبل القرار"><input id="metrictarget" type="number" step="any" placeholder="القيمة المستهدفة"><button onclick="createMetric()">إضافة مؤشر</button><div id="metriclist"></div></div></section>
+<section id="transfer" class="hidden">
+  <div class="panel"><h2>نقل المعرفة المؤسسية</h2><p class="muted">وثّق الخبرات والإجراءات وحدّد مستلم المعرفة واعتمد عملية التسليم. الإضافة تتطلب صلاحية محرر، والاعتماد يتطلب مدير مساحة العمل.</p>
+    <div class="top"><span class="tag" id="transferSummary">لا توجد بيانات بعد</span></div>
+    <label for="transferTitle">عنوان المعرفة</label><input id="transferTitle" placeholder="مثال: إغلاق الحسابات الشهرية" maxlength="180">
+    <label for="transferArea">المجال</label><input id="transferArea" placeholder="مثال: المالية" maxlength="120">
+    <label for="transferProcedure">الإجراء والخطوات</label><textarea id="transferProcedure" placeholder="اكتب خطوات التنفيذ بالتفصيل"></textarea>
+    <label for="transferCriticality">الأهمية</label><select id="transferCriticality"><option value="medium">متوسطة</option><option value="high">عالية</option><option value="low">منخفضة</option></select>
+    <label for="transferSuccessor">المستلم</label><select id="transferSuccessor"><option value="">لم يُحدد بعد</option></select>
+    <button onclick="createTransfer()">حفظ سجل المعرفة</button>
+  </div><div class="grid" id="transferList"></div>
+</section>
+<section id="skills" class="hidden">
+  <div class="panel"><h2>Skills Intelligence — تحليل فجوات المهارات</h2><p class="muted">تقييم ذاتي اختياري. التحليل إرشادي فقط ولا يستنتج المهارات من المستندات أو يرتّب الموظفين.</p>
+    <h3>ملفي المهاري</h3><label for="skillRole">المسمى الوظيفي</label><input id="skillRole" placeholder="مثال: محلل بيانات" maxlength="120">
+    <label for="skillLines">المهارات (مهارة | مستوى من 0 إلى 5 | ملاحظة اختيارية)، كل مهارة في سطر</label>
+    <textarea id="skillLines" placeholder="Excel | 3 | أستخدم الجداول المحورية&#10;Power BI | 2"></textarea>
+    <button onclick="saveMySkills()">حفظ تقييمي الذاتي</button><h3>مقارنة مهاراتي بالمتطلبات</h3><div id="myGaps"></div>
+  </div>
+  <div class="panel"><h3>مصفوفة متطلبات الأدوار</h3><p class="muted">الإضافة أو التعديل متاحان لمدير مساحة العمل فقط.</p>
+    <div id="reqForm"><input id="reqRole" placeholder="المسمى الوظيفي"><input id="reqSkill" placeholder="اسم المهارة"><label for="reqLevel">المستوى المطلوب</label><select id="reqLevel"><option value="1">1 — أساسي</option><option value="2">2</option><option value="3" selected>3 — متوسط</option><option value="4">4</option><option value="5">5 — خبير</option></select><button onclick="saveRequirement()">إضافة / تحديث المتطلب</button></div>
+    <div id="reqList"></div>
+  </div>
+  <div class="panel" id="skillGroupPanel"><h3>ملخص فجوات الفريق</h3><p class="muted">للمدير فقط، ولا تظهر إحصاءات المجموعات الأقل من 3 موظفين حفاظاً على الخصوصية.</p><div id="teamGaps"></div></div>
+</section></main></div>
+<script>
+let token=sessionStorage.getItem('km_token')||'',workspace='',workspaces=[];
+const $=id=>document.getElementById(id);
+function notice(s){$('notice').textContent=s}
+async function api(path,method='GET',body){let r=await fetch('/api/v1'+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined});let j=await r.json().catch(()=>({}));if(!r.ok)throw Error(typeof j.detail==='string'?j.detail:JSON.stringify(j.detail||j));return j}
+function show(page){['home','docs','ai','decisions','transfer','skills'].forEach(x=>$(x).classList.toggle('hidden',x!==page));$('auth').classList.toggle('hidden',!!token);if(!token)['home','docs','ai','decisions','transfer','skills'].forEach(x=>$(x).classList.add('hidden'))}
+async function authenticate(register){try{let b={email:$('email').value,password:$('password').value};if(register)b.full_name=$('name').value;let r=await api('/auth/'+(register?'register':'login'),'POST',b);token=r.access_token;sessionStorage.setItem('km_token',token);$('user').textContent=r.user.full_name;$('logout').classList.remove('hidden');show('home');await loadWS();notice('تم تسجيل الدخول')}catch(e){notice(e.message)}}
+function signout(){token='';workspace='';sessionStorage.removeItem('km_token');$('user').textContent='';$('logout').classList.add('hidden');show('home')}
+async function loadWS(){try{workspaces=await api('/workspaces');$('workspaces').replaceChildren();for(let w of workspaces){let el=document.createElement('div');el.className='item';el.textContent=w.name+' — '+w.current_user_role;el.onclick=()=>selectWS(w);$('workspaces').append(el)}}catch(e){notice(e.message)}}
+async function createWS(){try{await api('/workspaces','POST',{name:$('wsname').value,slug:$('wsslug').value,description:''});$('wsname').value='';$('wsslug').value='';await loadWS()}catch(e){notice(e.message)}}
+async function selectWS(w){workspace=w.id;$('current').textContent='مساحة العمل: '+w.name;show('docs');await loadDocs()}
+async function loadDocs(){if(!workspace)return;try{let docs=await api('/workspaces/'+workspace+'/documents');$('documents').replaceChildren();for(let d of docs){let el=document.createElement('div');el.className='item';el.textContent=d.title;el.onclick=async()=>{try{let full=await api('/documents/'+d.id);$('doctitle').value=full.title;$('doccontent').value=full.content||'';notice('عرض مستند محفوظ؛ زر الحفظ ينشئ مستنداً جديداً')}catch(e){notice(e.message)}};$('documents').append(el)}}catch(e){notice(e.message)}}
+async function createDoc(){if(!workspace)return notice('اختر مساحة عمل أولاً');try{await api('/workspaces/'+workspace+'/documents','POST',{title:$('doctitle').value,content:$('doccontent').value,content_type:'markdown'});$('doctitle').value='';$('doccontent').value='';await loadDocs();notice('تم حفظ المستند')}catch(e){notice(e.message)}}
+async function searchDocs(){if(!workspace)return notice('اختر مساحة عمل أولاً');notice('البحث جارٍ');try{let r=await api('/workspaces/'+workspace+'/ai/ask','POST',{query:$('query').value,top_k:4});$('results').textContent=r.answer+'\n\n'+r.citations.map(c=>c.citation_id+' '+c.document_title+' — '+c.document_id+' (درجة '+c.relevance_score+')').join('\n');notice(r.citations.length?'تم إرجاع مصادر موثقة':'لا توجد أدلة كافية')}catch(e){notice(e.message)}}
+let currentDecision='';
+async function loadDecisions(){if(!workspace)return notice('اختر مساحة عمل أولاً');try{let ds=await api('/workspaces/'+workspace+'/decisions');$('decisionlist').replaceChildren();for(const d of ds){let el=document.createElement('div');el.className='item';el.textContent=d.title+' — '+d.status;el.onclick=()=>openDecision(d);$('decisionlist').append(el)}}catch(e){notice(e.message)}}
+async function createDecision(){if(!workspace)return notice('اختر مساحة عمل أولاً');try{await api('/workspaces/'+workspace+'/decisions','POST',{title:$('decisiontitle').value,problem:$('decisionproblem').value,rationale:$('decisionreason').value});await loadDecisions();notice('تم حفظ القرار')}catch(e){notice(e.message)}}
+async function openDecision(d){currentDecision=d.id;$('decisionname').textContent=d.title;$('decisiondetail').classList.remove('hidden');await loadMetrics()}
+async function createMetric(){if(!currentDecision)return;try{await api('/workspaces/'+workspace+'/decisions/'+currentDecision+'/metrics','POST',{metric_name:$('metricname').value,unit:$('metricunit').value,direction:$('metricdirection').value,baseline:Number($('metricbaseline').value),target:Number($('metrictarget').value)});await loadMetrics();notice('تمت إضافة المؤشر')}catch(e){notice(e.message)}}
+async function loadMetrics(){if(!currentDecision)return;try{let report=await api('/workspaces/'+workspace+'/decisions/'+currentDecision+'/impact');$('metriclist').replaceChildren();for(const m of report.metrics){let el=document.createElement('div');el.className='item';let label=document.createElement('p');label.textContent=m.metric_name+' | الأساسي: '+m.baseline+' | الهدف: '+m.target+' | آخر قياس: '+(m.latest_value??'لم يُقَس بعد');let input=document.createElement('input');input.type='number';input.step='any';input.placeholder='قياس فعلي جديد';let btn=document.createElement('button');btn.textContent='حفظ القياس';btn.onclick=async()=>{if(input.value==='')return notice('أدخل قيمة القياس');try{await api('/workspaces/'+workspace+'/decisions/'+currentDecision+'/metrics/'+m.id+'/measurements','POST',{value:Number(input.value)});await loadMetrics()}catch(e){notice(e.message)}};el.append(label,input,btn);$('metriclist').append(el)}}catch(e){notice(e.message)}}
+if(token){api('/auth/me').then(u=>{$('user').textContent=u.full_name;$('logout').classList.remove('hidden');show('home');loadWS()}).catch(signout)}else show('home');
+
+// KnowledgeHub 2030 extensions. Dynamic content is inserted via textContent, not HTML.
+const kbase=()=>'/workspaces/'+workspace;
+function textNode(tag,txt,cls=''){const el=document.createElement(tag);el.textContent=String(txt);if(cls)el.className=cls;return el}
+function clearNode(id){$(id).replaceChildren()}
+function currentRole(){let w=workspaces.find(x=>x.id===workspace);return w?w.current_user_role:''}
+function canAdmin(){return ['admin','owner'].includes(currentRole())}
+function canEdit(){return ['editor','admin','owner'].includes(currentRole())}
+const reviewLabels={draft:'مسودة',in_review:'قيد المراجعة',approved:'معتمد'};
+const critLabels={low:'منخفضة',medium:'متوسطة',high:'عالية'};
+async function loadTransfers(){
+ if(!workspace)return notice('اختر مساحة عمل أولاً');
+ try{
+  const [ts,summary,members]=await Promise.all([api(kbase()+'/knowledge-transfers'),api(kbase()+'/knowledge-transfers/risk-summary'),api(kbase()+'/members')]);
+  $('transferSummary').textContent='الإجمالي: '+summary.total+' | حرجة غير معتمدة: '+summary.high_priority_unapproved+' | بلا مستلم: '+summary.without_successor+' | معتمدة: '+summary.approved;
+  $('transferSuccessor').replaceChildren(new Option('لم يُحدد بعد',''));
+  for(let m of members)$('transferSuccessor').add(new Option(m.full_name+' — '+m.role,m.user_id));
+  clearNode('transferList');
+  if(!ts.length)$('transferList').append(textNode('p','لا توجد سجلات نقل معرفة بعد.','hint'));
+  for(let t of ts){
+   let card=textNode('div','', 'item');
+   card.append(textNode('h3',t.title),textNode('p',t.knowledge_area+' | '+critLabels[t.criticality]+' | '+reviewLabels[t.status]),textNode('p',t.procedure));
+   let recipient=members.find(m=>m.user_id===t.successor_id);
+   card.append(textNode('p','المستلم: '+(recipient?recipient.full_name:'غير محدد'),'hint'));
+   if(t.review_note)card.append(textNode('p','ملاحظة المراجعة: '+t.review_note,'hint'));
+   if(canEdit() && t.status!=='approved'){
+    let send=textNode('button','إرسال للمراجعة');send.onclick=()=>reviewTransfer(t.id,'in_review');card.append(send);
+   }
+   if(canAdmin() && t.status!=='approved'){
+    let approve=textNode('button','اعتماد التسليم','alt');approve.onclick=()=>reviewTransfer(t.id,'approved');card.append(approve);
+   }
+   $('transferList').append(card);
+  }
+ }catch(e){notice(e.message)}
+}
+async function createTransfer(){
+ if(!workspace)return notice('اختر مساحة عمل أولاً');
+ try{
+  await api(kbase()+'/knowledge-transfers','POST',{
+   title:$('transferTitle').value.trim(), knowledge_area:$('transferArea').value.trim(),
+   procedure:$('transferProcedure').value.trim(),criticality:$('transferCriticality').value,
+   successor_id:$('transferSuccessor').value||null
+  });
+  for(let id of ['transferTitle','transferArea','transferProcedure'])$(id).value='';
+  await loadTransfers();notice('تم حفظ سجل نقل المعرفة');
+ }catch(e){notice(e.message)}
+}
+async function reviewTransfer(id,status){
+ try{await api(kbase()+'/knowledge-transfers/'+id+'/review','PATCH',{status,review_note:''});await loadTransfers();notice('تم تحديث حالة التسليم')}
+ catch(e){notice(e.message)}
+}
+async function loadSkills(){
+ if(!workspace)return notice('اختر مساحة عمل أولاً');
+ try{
+  const [profile,own,reqs]=await Promise.all([api(kbase()+'/skills/my-profile'),api(kbase()+'/skills/my-gap'),api(kbase()+'/skills/requirements')]);
+  $('skillRole').value=profile.role_name;
+  $('skillLines').value=profile.skills.map(x=>x.skill_name+' | '+x.level+(x.evidence_note?' | '+x.evidence_note:'')).join('\n');
+  clearNode('myGaps');
+  if(!own.role_name) $('myGaps').append(textNode('p','احفظ ملفك المهاري أولاً.','hint'));
+  else if(!own.gaps.length)$('myGaps').append(textNode('p','لا توجد متطلبات منشورة لهذا الدور حتى الآن.','hint'));
+  for(let x of own.gaps){const status=x.status==='unassessed'?'غير مقيمة':x.status==='meets_target'?'يحقق المستوى':'فجوة: '+x.gap;
+    $('myGaps').append(textNode('div',x.skill_name+' — المطلوب: '+x.target_level+' | الحالي: '+(x.current_level??'—')+' | '+status,'stat'));
+  }
+  $('reqForm').classList.toggle('hidden',!canAdmin());
+  $('skillGroupPanel').classList.toggle('hidden',!canAdmin());
+  clearNode('reqList');
+  if(!reqs.length)$('reqList').append(textNode('p','لم تُضف متطلبات مهارات بعد.','hint'));
+  for(let x of reqs){let line=textNode('div',x.role_name+' — '+x.skill_name+' | المستوى: '+x.target_level,'stat');
+    if(canAdmin()){let btn=textNode('button','حذف','alt');btn.onclick=async()=>{try{await api(kbase()+'/skills/requirements/'+x.id,'DELETE');await loadSkills();notice('تم حذف المتطلب')}catch(e){notice(e.message)}};line.append(btn)}
+    $('reqList').append(line);
+  }
+  clearNode('teamGaps');
+  if(canAdmin()){
+    let aggregate=await api(kbase()+'/skills/gap-summary');
+    if(!aggregate.groups.length)$('teamGaps').append(textNode('p','أضف مصفوفة مهارات أولاً.','hint'));
+    for(let group of aggregate.groups){
+      let el=textNode('div','', 'item');el.append(textNode('h3',group.role_name));
+      if(group.suppressed)el.append(textNode('p','تم إخفاء الإحصاءات: عدد الملفات أقل من 3.','hint'));
+      else {el.append(textNode('p','عدد المشاركين: '+group.profile_count,'hint'));
+        for(let x of group.skills)el.append(textNode('p',x.suppressed ? x.skill_name+' — النتائج محجوبة: أقل من 3 تقييمات' : x.skill_name+' — دون الهدف: '+x.below_target+' | يحقق الهدف: '+x.meets_target+' | غير مقيم: '+x.unassessed));}
+      $('teamGaps').append(el);
+    }
+  }
+ }catch(e){notice(e.message)}
+}
+async function saveMySkills(){
+ if(!workspace)return notice('اختر مساحة عمل أولاً');
+ try{
+  let skills=$('skillLines').value.split('\n').map(x=>x.trim()).filter(Boolean).map(line=>{
+   let parts=line.split('|').map(x=>x.trim());
+   if(parts.length<2||parts.length>3||!/^[0-5]$/.test(parts[1]))throw Error('كل سطر لازم يكون: اسم المهارة | المستوى من 0 إلى 5 | ملاحظة اختيارية');
+   return {skill_name:parts[0],level:Number(parts[1]),evidence_note:parts[2]||''};
+  });
+  await api(kbase()+'/skills/my-profile','PUT',{role_name:$('skillRole').value.trim(),skills});
+  await loadSkills();notice('تم حفظ تقييمك الذاتي');
+ }catch(e){notice(e.message)}
+}
+async function saveRequirement(){
+ try{await api(kbase()+'/skills/requirements','POST',{
+  role_name:$('reqRole').value.trim(),skill_name:$('reqSkill').value.trim(),target_level:Number($('reqLevel').value)
+ });await loadSkills();notice('تم حفظ متطلب المهارة')}catch(e){notice(e.message)}
+}
+</script></body></html>
