@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.db import init_db
 from app.tenant_core import init_tenant_schema, router as tenants_router
-from app.routers import auth, workspaces, documents, collaboration, decisions, knowledge_transfer, skills
+from app import auth, workspaces, documents, collaboration, decisions, knowledge_transfer, skills
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
