@@ -1,8 +1,8 @@
 import os
 
 class Settings:
-    PROJECT_NAME: str = "KnowledgeHub Saudi 2030"
-    VERSION: str = "1.0.0"
+    PROJECT_NAME: str = "Knowledge Intelligence"
+    VERSION: str = "2.0.0"
     API_V1_PREFIX: str = "/api/v1"
     
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "")
