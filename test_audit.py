@@ -2,7 +2,7 @@ import uuid
 
 from app.config import settings
 from app.db import get_db, init_db
-from app.tenant_core import init_tenant_schema
+from app.migrations import run_migrations
 from app.audit import record_audit_event
 
 
@@ -17,7 +17,7 @@ def test_audit_events_are_persisted_with_tenant_and_actor(tmp_path, monkeypatch)
             "INSERT INTO users(id,email,full_name,hashed_password) VALUES(?,?,?,?)",
             (actor_id, "audit@example.test", "Audit Actor", "hash"),
         )
-    init_tenant_schema()
+    run_migrations()
     tenant_id = str(uuid.uuid4())
     with get_db(db_file) as conn:
         conn.execute(
