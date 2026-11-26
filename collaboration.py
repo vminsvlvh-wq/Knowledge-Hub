@@ -2,6 +2,7 @@ import uuid
 import json
 from typing import Dict, Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
+from urllib.parse import urlsplit
 from app.db import get_db
 from app.auth import decode_access_token
 from app.rbac import check_document_access
@@ -55,6 +56,17 @@ class DocumentRoomManager:
 
 collab_manager = DocumentRoomManager()
 
+
+def is_allowed_websocket_origin(origin: str, host: str, configured_origins=None) -> bool:
+    if not origin or not host:
+        return False
+    parsed = urlsplit(origin)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return False
+    configured = {item.strip().rstrip("/").lower() for item in (configured_origins or []) if item.strip()}
+    return origin.rstrip("/").lower() in configured or parsed.netloc.lower() == host.lower()
+
+
 USER_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6"]
 
 @router.websocket("/ws/documents/{document_id}")
@@ -66,10 +78,7 @@ async def collaborative_editing_ws(
     origin = websocket.headers.get("origin", "")
     host = websocket.headers.get("host", "").lower()
     configured = [x.strip().lower() for x in __import__("os").getenv("CORS_ORIGINS", "").split(",") if x.strip()]
-    origin_host = __import__("urllib.parse", fromlist=["urlsplit"]).urlsplit(origin).netloc.lower()
-    allowed_origin = bool(origin) and (
-        origin.lower() in configured or (origin_host and origin_host == host)
-    )
+    allowed_origin = is_allowed_websocket_origin(origin, host, configured)
     if not allowed_origin:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
