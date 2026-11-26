@@ -31,7 +31,15 @@ def create_workspace(ws_in: WorkspaceCreate, current_user: dict = Depends(get_cu
             "INSERT INTO workspaces (id, name, slug, description, created_by) VALUES (?, ?, ?, ?, ?)",
             (ws_id, ws_in.name.strip(), slug_clean, ws_in.description.strip(), user_id)
         )
-        
+        # Each newly created workspace starts in its own isolated tenant.
+        tenant_id = str(uuid.uuid4())
+        tenant_slug = ("ws-" + slug_clean)[:80]
+        cursor.execute("INSERT INTO tenants (id, name, slug, created_by) VALUES (?, ?, ?, ?)",
+                       (tenant_id, ws_in.name.strip(), tenant_slug, user_id))
+        cursor.execute("UPDATE workspaces SET tenant_id = ? WHERE id = ?", (tenant_id, ws_id))
+        cursor.execute("INSERT INTO tenant_memberships (id, tenant_id, user_id, role) VALUES (?, ?, ?, 'owner')",
+                       (str(uuid.uuid4()), tenant_id, user_id))
+
         # Creator is automatically the OWNER
         cursor.execute(
             "INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES (?, ?, ?, ?)",
@@ -112,7 +120,15 @@ def add_workspace_member(id: str, member_in: WorkspaceMemberAdd, current_user: d
             "INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES (?, ?, ?, ?)",
             (new_member_id, id, target_user_id, role_requested)
         )
-        
+        # Adding a workspace member is an explicit tenant invitation as well.
+        cursor.execute("SELECT tenant_id FROM workspaces WHERE id = ?", (id,))
+        tenant_row = cursor.fetchone()
+        if tenant_row and tenant_row["tenant_id"]:
+            cursor.execute("""INSERT INTO tenant_memberships (id, tenant_id, user_id, role)
+                              VALUES (?, ?, ?, 'member')
+                              ON CONFLICT(tenant_id, user_id) DO NOTHING""",
+                           (str(uuid.uuid4()), tenant_row["tenant_id"], target_user_id))
+
         cursor.execute("""
             SELECT wm.id, wm.workspace_id, wm.user_id, wm.role, wm.joined_at, u.email, u.full_name
             FROM workspace_members wm
