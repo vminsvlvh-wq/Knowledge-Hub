@@ -1,4 +1,5 @@
 import uuid
+import pytest
 
 from app.config import settings
 from app.db import get_db, init_db
@@ -38,3 +39,9 @@ def test_audit_events_are_persisted_with_tenant_and_actor(tmp_path, monkeypatch)
     assert rows[0]["actor_id"] == actor_id
     assert rows[0]["action"] == "member.invited"
     assert '"role": "member"' in rows[0]["details_json"]
+    with pytest.raises(Exception):
+        with get_db(db_file) as conn:
+            conn.execute("UPDATE audit_events SET action='tampered' WHERE id=?", (rows[0]["id"],))
+    with pytest.raises(Exception):
+        with get_db(db_file) as conn:
+            conn.execute("DELETE FROM audit_events WHERE id=?", (rows[0]["id"],))
