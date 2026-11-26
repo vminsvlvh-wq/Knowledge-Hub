@@ -1,13 +1,69 @@
 import uuid
-from fastapi import APIRouter, HTTPException, status, Depends
+from datetime import datetime, timedelta
+from fastapi import APIRouter, HTTPException, status, Depends, Response
+from fastapi.security import OAuth2PasswordBearer
+from jose import jwt, JWTError
+from passlib.context import CryptContext
+from app.config import settings
 from app.db import get_db
-from app.auth import hash_password, verify_password, create_access_token, get_current_user
 from app.schemas import UserCreate, UserLogin, TokenResponse, UserOut
+
+_password_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+_oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_PREFIX}/auth/login")
+
+def hash_password(password: str) -> str:
+    return _password_context.hash(password)
+
+def verify_password(password: str, hashed_password: str) -> bool:
+    return _password_context.verify(password, hashed_password)
+
+def create_access_token(data: dict) -> str:
+    if not settings.JWT_SECRET_KEY:
+        raise RuntimeError("JWT_SECRET_KEY must be configured before issuing tokens")
+    payload = data.copy()
+    payload["exp"] = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+def decode_access_token(token: str) -> dict:
+    if not settings.JWT_SECRET_KEY:
+        raise RuntimeError("JWT_SECRET_KEY is not configured")
+    return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+
+def get_current_user(token: str = Depends(_oauth2_scheme)) -> dict:
+    credentials_error = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="بيانات المصادقة غير صالحة أو منتهية",
+        headers={"WWW-Authenticate": "Bearer"}
+    )
+    try:
+        payload = decode_access_token(token)
+        user_id = payload.get("sub")
+        if not user_id:
+            raise credentials_error
+    except (JWTError, RuntimeError, TypeError, ValueError):
+        raise credentials_error
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id,email,full_name,created_at FROM users WHERE id=?", (user_id,))
+        user = cursor.fetchone()
+    if not user:
+        raise credentials_error
+    return dict(user)
 
 router = APIRouter(prefix="/auth", tags=["المصادقة والمستخدمين (Auth)"])
 
+def _set_auth_cookie(response: Response, token: str):
+    import os
+    response.set_cookie(
+        key="ki_access_token", value=token, httponly=True,
+        secure=os.getenv("ENVIRONMENT", "development").lower() == "production",
+        samesite="lax", path="/",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+
+
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-def register(user_in: UserCreate):
+def register(user_in: UserCreate, response: Response):
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM users WHERE email = ?", (user_in.email.lower().strip(),))
@@ -31,6 +87,7 @@ def register(user_in: UserCreate):
         user_dict = dict(row)
         
     token = create_access_token({"sub": user_id, "email": email_clean})
+    _set_auth_cookie(response, token)
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -38,7 +95,7 @@ def register(user_in: UserCreate):
     }
 
 @router.post("/login", response_model=TokenResponse)
-def login(login_in: UserLogin):
+def login(login_in: UserLogin, response: Response):
     email_clean = login_in.email.lower().strip()
     with get_db() as conn:
         cursor = conn.cursor()
@@ -60,11 +117,23 @@ def login(login_in: UserLogin):
         }
     
     token = create_access_token({"sub": user_dict["id"], "email": email_clean})
+    _set_auth_cookie(response, token)
     return {
         "access_token": token,
         "token_type": "bearer",
         "user": user_dict
     }
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(response: Response):
+    import os
+    response.delete_cookie(
+        "ki_access_token", path="/", httponly=True, samesite="lax",
+        secure=os.getenv("ENVIRONMENT", "development").lower() == "production",
+    )
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
+
 
 @router.get("/me", response_model=UserOut)
 def get_me(current_user: dict = Depends(get_current_user)):

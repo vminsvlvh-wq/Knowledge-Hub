@@ -3,7 +3,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.db import init_db
-from app.routers import auth, workspaces, documents, collaboration, decisions, knowledge_transfer, skills
+from app.migrations import run_migrations
+from app.tenant_core import router as tenants_router
+from app import auth, workspaces, documents, collaboration, decisions, knowledge_transfer, skills
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -24,11 +26,12 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup():
     init_db()
+    run_migrations()
 
 from fastapi.responses import HTMLResponse
 import os
 
-STATIC_INDEX_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "index.html")
+STATIC_INDEX_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
 
 @app.get("/", response_class=HTMLResponse, tags=["الواجهة الأمامية (Frontend Web App)"])
 def serve_frontend():
@@ -53,12 +56,18 @@ def ready():
     try:
         with get_db() as conn:
             conn.execute("SELECT 1").fetchone()
+            migration = conn.execute("SELECT MAX(version) AS version FROM schema_migrations").fetchone()
+            if not migration or (migration["version"] or 0) < 3:
+                raise HTTPException(status_code=503, detail="Database migrations incomplete")
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=503, detail="Database unavailable")
-    return {"status": "ready"}
+    return {"status": "ready", "schema_version": 3}
 
 # Mount routers
 app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
+app.include_router(tenants_router, prefix=settings.API_V1_PREFIX)
 app.include_router(workspaces.router, prefix=settings.API_V1_PREFIX)
 app.include_router(documents.router, prefix=settings.API_V1_PREFIX)
 app.include_router(decisions.router, prefix=settings.API_V1_PREFIX)

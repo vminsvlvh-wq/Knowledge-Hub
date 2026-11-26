@@ -31,7 +31,15 @@ def create_workspace(ws_in: WorkspaceCreate, current_user: dict = Depends(get_cu
             "INSERT INTO workspaces (id, name, slug, description, created_by) VALUES (?, ?, ?, ?, ?)",
             (ws_id, ws_in.name.strip(), slug_clean, ws_in.description.strip(), user_id)
         )
-        
+        # Each newly created workspace starts in its own isolated tenant.
+        tenant_id = str(uuid.uuid4())
+        tenant_slug = ("ws-" + slug_clean[:60] + "-" + ws_id.replace("-", "")[:8])[:80]
+        cursor.execute("INSERT INTO tenants (id, name, slug, created_by) VALUES (?, ?, ?, ?)",
+                       (tenant_id, ws_in.name.strip(), tenant_slug, user_id))
+        cursor.execute("UPDATE workspaces SET tenant_id = ? WHERE id = ?", (tenant_id, ws_id))
+        cursor.execute("INSERT INTO tenant_memberships (id, tenant_id, user_id, role) VALUES (?, ?, ?, 'owner')",
+                       (str(uuid.uuid4()), tenant_id, user_id))
+
         # Creator is automatically the OWNER
         cursor.execute(
             "INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES (?, ?, ?, ?)",
@@ -41,7 +49,10 @@ def create_workspace(ws_in: WorkspaceCreate, current_user: dict = Depends(get_cu
         cursor.execute("SELECT * FROM workspaces WHERE id = ?", (ws_id,))
         row = dict(cursor.fetchone())
         row["current_user_role"] = Role.OWNER.value
-        return row
+    from app.audit import record_audit_event
+    record_audit_event(user_id, "workspace.created", "workspace", ws_id, tenant_id,
+                       {"slug": slug_clean})
+    return row
 
 @router.get("", response_model=List[WorkspaceOut])
 def list_my_workspaces(current_user: dict = Depends(get_current_user)):
@@ -52,6 +63,7 @@ def list_my_workspaces(current_user: dict = Depends(get_current_user)):
             SELECT w.*, wm.role as current_user_role
             FROM workspaces w
             INNER JOIN workspace_members wm ON w.id = wm.workspace_id
+            INNER JOIN tenant_memberships tm ON tm.tenant_id = w.tenant_id AND tm.user_id = wm.user_id
             WHERE wm.user_id = ?
             ORDER BY w.created_at DESC
         """, (user_id,))
@@ -73,8 +85,8 @@ def get_workspace(id: str, current_user: dict = Depends(get_current_user)):
 
 @router.post("/{id}/members", response_model=WorkspaceMemberOut, status_code=status.HTTP_201_CREATED)
 def add_workspace_member(id: str, member_in: WorkspaceMemberAdd, current_user: dict = Depends(get_current_user)):
-    # Requires ADMIN or OWNER role
-    require_workspace_role(id, current_user["id"], Role.ADMIN)
+    # Requires ADMIN or OWNER role. Only an OWNER may appoint another OWNER.
+    actor = require_workspace_role(id, current_user["id"], Role.ADMIN)
     
     role_requested = member_in.role.lower().strip()
     valid_roles = [r.value for r in Role]
@@ -83,6 +95,8 @@ def add_workspace_member(id: str, member_in: WorkspaceMemberAdd, current_user: d
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"الدور غير صالح. الأدوار المتاحة: {', '.join(valid_roles)}"
         )
+    if role_requested == Role.OWNER.value and actor["role"] != Role.OWNER.value:
+        raise HTTPException(status_code=403, detail="فقط مالك مساحة العمل يمكنه تعيين مالك آخر")
     
     with get_db() as conn:
         cursor = conn.cursor()
@@ -112,14 +126,27 @@ def add_workspace_member(id: str, member_in: WorkspaceMemberAdd, current_user: d
             "INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES (?, ?, ?, ?)",
             (new_member_id, id, target_user_id, role_requested)
         )
-        
+        # Adding a workspace member is an explicit tenant invitation as well.
+        cursor.execute("SELECT tenant_id FROM workspaces WHERE id = ?", (id,))
+        tenant_row = cursor.fetchone()
+        if tenant_row and tenant_row["tenant_id"]:
+            cursor.execute("""INSERT INTO tenant_memberships (id, tenant_id, user_id, role)
+                              VALUES (?, ?, ?, 'member')
+                              ON CONFLICT(tenant_id, user_id) DO NOTHING""",
+                           (str(uuid.uuid4()), tenant_row["tenant_id"], target_user_id))
+
         cursor.execute("""
             SELECT wm.id, wm.workspace_id, wm.user_id, wm.role, wm.joined_at, u.email, u.full_name
             FROM workspace_members wm
             JOIN users u ON wm.user_id = u.id
             WHERE wm.id = ?
         """, (new_member_id,))
-        return dict(cursor.fetchone())
+        result = dict(cursor.fetchone())
+        tenant_id = tenant_row["tenant_id"] if tenant_row else None
+    from app.audit import record_audit_event
+    record_audit_event(current_user["id"], "workspace.member_added", "workspace", id,
+                       tenant_id, {"target_user_id": target_user_id, "role": role_requested})
+    return result
 
 @router.get("/{id}/members", response_model=List[WorkspaceMemberOut])
 def list_workspace_members(id: str, current_user: dict = Depends(get_current_user)):
@@ -130,6 +157,8 @@ def list_workspace_members(id: str, current_user: dict = Depends(get_current_use
             SELECT wm.id, wm.workspace_id, wm.user_id, wm.role, wm.joined_at, u.email, u.full_name
             FROM workspace_members wm
             JOIN users u ON wm.user_id = u.id
+            JOIN workspaces w ON w.id = wm.workspace_id
+            JOIN tenant_memberships tm ON tm.tenant_id = w.tenant_id AND tm.user_id = wm.user_id
             WHERE wm.workspace_id = ?
             ORDER BY wm.joined_at ASC
         """, (id,))
@@ -141,6 +170,9 @@ def update_member_role(
 ):
     current_mem = require_workspace_role(id, current_user["id"], Role.ADMIN)
     new_role = role_update.role.lower().strip()
+    valid_roles = {r.value for r in Role}
+    if new_role not in valid_roles:
+        raise HTTPException(status_code=400, detail="الدور المحدد غير صالح")
     
     with get_db() as conn:
         cursor = conn.cursor()
@@ -149,12 +181,19 @@ def update_member_role(
         if not target_mem:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="العضو غير موجود في مساحة العمل")
         
-        # Only Owner can demote an Owner or grant Owner role
+        # Only an Owner can promote/demote another Owner.
         if (target_mem["role"] == Role.OWNER.value or new_role == Role.OWNER.value) and current_mem["role"] != Role.OWNER.value:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="فقط مالك مساحة العمل يمكنه تعديل صلاحيات المالك"
             )
+        if target_mem["role"] == Role.OWNER.value and new_role != Role.OWNER.value:
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM workspace_members WHERE workspace_id = ? AND role = 'owner'",
+                (id,)
+            )
+            if cursor.fetchone()["count"] <= 1:
+                raise HTTPException(status_code=400, detail="لا يمكن تخفيض صلاحية المالك الوحيد")
             
         cursor.execute(
             "UPDATE workspace_members SET role = ? WHERE workspace_id = ? AND user_id = ?",
@@ -167,7 +206,13 @@ def update_member_role(
             JOIN users u ON wm.user_id = u.id
             WHERE wm.workspace_id = ? AND wm.user_id = ?
         """, (id, user_id))
-        return dict(cursor.fetchone())
+        result = dict(cursor.fetchone())
+        tenant_row = cursor.execute("SELECT tenant_id FROM workspaces WHERE id=?", (id,)).fetchone()
+    from app.audit import record_audit_event
+    record_audit_event(current_user["id"], "workspace.member_role_changed", "workspace", id,
+                       tenant_row["tenant_id"] if tenant_row else None,
+                       {"target_user_id": user_id, "new_role": new_role})
+    return result
 
 @router.delete("/{id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_member(id: str, user_id: str, current_user: dict = Depends(get_current_user)):
@@ -180,6 +225,8 @@ def remove_member(id: str, user_id: str, current_user: dict = Depends(get_curren
         if not target_mem:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="العضو غير موجود في مساحة العمل")
         
+        if target_mem["role"] == Role.OWNER.value and current_mem["role"] != Role.OWNER.value:
+            raise HTTPException(status_code=403, detail="فقط مالك مساحة العمل يمكنه إزالة مالك آخر")
         if target_mem["role"] == Role.OWNER.value:
             # Check if there are other owners
             cursor.execute(
@@ -193,3 +240,8 @@ def remove_member(id: str, user_id: str, current_user: dict = Depends(get_curren
                 )
                 
         cursor.execute("DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?", (id, user_id))
+        tenant_row = cursor.execute("SELECT tenant_id FROM workspaces WHERE id=?", (id,)).fetchone()
+    from app.audit import record_audit_event
+    record_audit_event(current_user["id"], "workspace.member_removed", "workspace", id,
+                       tenant_row["tenant_id"] if tenant_row else None,
+                       {"target_user_id": user_id})

@@ -1,7 +1,8 @@
 import uuid
 import json
 from typing import Dict, Any
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
+from urllib.parse import urlsplit
 from app.db import get_db
 from app.auth import decode_access_token
 from app.rbac import check_document_access
@@ -55,15 +56,36 @@ class DocumentRoomManager:
 
 collab_manager = DocumentRoomManager()
 
+
+def is_allowed_websocket_origin(origin: str, host: str, configured_origins=None) -> bool:
+    if not origin or not host:
+        return False
+    parsed = urlsplit(origin)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return False
+    configured = {item.strip().rstrip("/").lower() for item in (configured_origins or []) if item.strip()}
+    return origin.rstrip("/").lower() in configured or parsed.netloc.lower() == host.lower()
+
+
 USER_COLORS = ["#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6"]
 
 @router.websocket("/ws/documents/{document_id}")
 async def collaborative_editing_ws(
     websocket: WebSocket,
     document_id: str,
-    token: str = Query(...)
 ):
-    # 1. Authenticate user from JWT token
+    # Authenticate only from an HttpOnly same-origin cookie; never accept JWTs in URLs.
+    origin = websocket.headers.get("origin", "")
+    host = websocket.headers.get("host", "").lower()
+    configured = [x.strip().lower() for x in __import__("os").getenv("CORS_ORIGINS", "").split(",") if x.strip()]
+    allowed_origin = is_allowed_websocket_origin(origin, host, configured)
+    if not allowed_origin:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    token = websocket.cookies.get("ki_access_token")
+    if not token:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
     try:
         payload = decode_access_token(token)
         user_id = payload.get("sub")
@@ -119,6 +141,9 @@ async def collaborative_editing_ws(
     try:
         while True:
             raw_data = await websocket.receive_text()
+            if len(raw_data) > 2_100_000:
+                await websocket.send_text(json.dumps({"type": "error", "detail": "payload too large"}))
+                continue
             try:
                 msg = json.loads(raw_data)
             except Exception:
@@ -137,7 +162,16 @@ async def collaborative_editing_ws(
 
             # B. Content edits / delta broadcasting
             elif event_type == "content_update":
+                # A read-only collaborator must never be able to mutate document state.
+                try:
+                    check_document_access(document_id, user_id, required_permission="edit")
+                except Exception:
+                    await websocket.send_text(json.dumps({"type": "error", "detail": "edit permission required"}))
+                    continue
                 new_content = msg.get("content", "")
+                if not isinstance(new_content, str) or len(new_content.encode("utf-8")) > 2_000_000:
+                    await websocket.send_text(json.dumps({"type": "error", "detail": "invalid content or payload too large"}))
+                    continue
                 # Broadcast real-time update to all collaborators
                 await collab_manager.broadcast(document_id, {
                     "type": "content_updated",
@@ -156,8 +190,18 @@ async def collaborative_editing_ws(
 
             # C. Save Version Snapshot
             elif event_type == "save_snapshot":
+                try:
+                    check_document_access(document_id, user_id, required_permission="edit")
+                except Exception:
+                    await websocket.send_text(json.dumps({"type": "error", "detail": "edit permission required"}))
+                    continue
                 summary = msg.get("summary", "حفظ تلقائي للنسخة")
                 content_to_save = msg.get("content")
+                if content_to_save is not None and (
+                    not isinstance(content_to_save, str) or len(content_to_save.encode("utf-8")) > 2_000_000
+                ):
+                    await websocket.send_text(json.dumps({"type": "error", "detail": "invalid snapshot or payload too large"}))
+                    continue
                 with get_db() as conn:
                     cursor = conn.cursor()
                     if content_to_save is None:

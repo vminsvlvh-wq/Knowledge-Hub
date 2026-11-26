@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import settings
 from app.db import init_db
+from app.migrations import run_migrations
 from app.main import app
 from fastapi.testclient import TestClient
 
@@ -18,6 +19,7 @@ class TestKnowledgeManagementBackend(unittest.TestCase):
         cls.temp_db.close()
         settings.DB_PATH = cls.temp_db.name
         init_db(cls.temp_db.name)
+        run_migrations()
         cls.client = TestClient(app)
 
         # 1. Register Users at setup
@@ -63,6 +65,9 @@ class TestKnowledgeManagementBackend(unittest.TestCase):
         resp_health = self.client.get("/api/health")
         self.assertEqual(resp_health.status_code, 200)
         self.assertEqual(resp_health.json()["status"], "online")
+        resp_ready = self.client.get("/api/ready")
+        self.assertEqual(resp_ready.status_code, 200)
+        self.assertEqual(resp_ready.json()["schema_version"], 3)
 
     def test_02_login_and_me(self):
         resp = self.client.post("/api/v1/auth/login", json={
@@ -175,8 +180,10 @@ class TestKnowledgeManagementBackend(unittest.TestCase):
         self.assertEqual(versions_resp.json()[0]["version_number"], 2)
 
     def test_05_websocket_collaboration(self):
-        ws_editor_url = f"/ws/documents/{self.child_doc_id}?token={self.editor_token}"
-        with self.client.websocket_connect(ws_editor_url) as ws_editor:
+        # Use explicit per-user cookies, not the last HTTP login cookie in TestClient.
+        self.client.cookies.clear()
+        ws_editor_url = f"/ws/documents/{self.child_doc_id}"
+        with self.client.websocket_connect(ws_editor_url, headers={"Origin": "http://testserver", "Cookie": f"ki_access_token={self.editor_token}"}) as ws_editor:
             init_msg = ws_editor.receive_text()
             data = json.loads(init_msg)
             self.assertEqual(data["type"], "init")
@@ -188,10 +195,19 @@ class TestKnowledgeManagementBackend(unittest.TestCase):
             self.assertEqual(json.loads(pong_msg)["type"], "pong")
 
             # Connect Viewer
-            ws_viewer_url = f"/ws/documents/{self.child_doc_id}?token={self.viewer_token}"
-            with self.client.websocket_connect(ws_viewer_url) as ws_viewer:
+            ws_viewer_url = f"/ws/documents/{self.child_doc_id}"
+            with self.client.websocket_connect(ws_viewer_url, headers={"Origin": "http://testserver", "Cookie": f"ki_access_token={self.viewer_token}"}) as ws_viewer:
                 viewer_init = ws_viewer.receive_text()
                 self.assertEqual(json.loads(viewer_init)["type"], "init")
+
+                # Read-only members must not be able to send document changes.
+                ws_viewer.send_text(json.dumps({
+                    "type": "content_update",
+                    "content": "viewer change attempt"
+                }))
+                denied = json.loads(ws_viewer.receive_text())
+                self.assertEqual(denied["type"], "error")
+                self.assertEqual(denied["detail"], "edit permission required")
 
                 joined_event = ws_editor.receive_text()
                 self.assertEqual(json.loads(joined_event)["type"], "presence:joined")

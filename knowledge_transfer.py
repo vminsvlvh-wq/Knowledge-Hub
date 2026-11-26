@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from app.auth import get_current_user
 from app.db import get_db
-from app.rbac import Role, require_workspace_role
+from app.rbac import Role, require_workspace_role, check_document_access
 
 router = APIRouter(prefix='/workspaces/{workspace_id}/knowledge-transfers', tags=['Knowledge Transfer'])
 
@@ -39,15 +39,25 @@ def create_transfer(workspace_id: str, body: TransferIn, user=Depends(get_curren
             doc = conn.execute('SELECT id FROM documents WHERE id=? AND workspace_id=?', (body.source_document_id, workspace_id)).fetchone()
             if not doc:
                 raise HTTPException(400, 'المستند المرجعي ليس في مساحة العمل')
+            check_document_access(body.source_document_id, user['id'], required_permission='view')
             # A document can have user-specific access restrictions; do not expose its contents here.
         if body.successor_id:
-            member = conn.execute('SELECT 1 FROM workspace_members WHERE workspace_id=? AND user_id=?', (workspace_id, body.successor_id)).fetchone()
+            member = conn.execute('''SELECT 1 FROM workspace_members wm
+                JOIN workspaces w ON w.id=wm.workspace_id
+                JOIN tenant_memberships tm ON tm.tenant_id=w.tenant_id AND tm.user_id=wm.user_id
+                WHERE wm.workspace_id=? AND wm.user_id=?''', (workspace_id, body.successor_id)).fetchone()
             if not member:
                 raise HTTPException(400, 'المستلم ليس عضواً في مساحة العمل')
         transfer_id = str(uuid.uuid4())
         conn.execute('''INSERT INTO knowledge_transfers
             (id,workspace_id,title,knowledge_area,procedure,criticality,source_document_id,owner_id,successor_id)
             VALUES (?,?,?,?,?,?,?,?,?)''', (transfer_id,workspace_id,body.title,body.knowledge_area,body.procedure,body.criticality,body.source_document_id,user['id'],body.successor_id))
+    with get_db() as conn:
+        tenant = conn.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+    from app.audit import record_audit_event
+    record_audit_event(user["id"], "knowledge_transfer.created", "knowledge_transfer",
+                       transfer_id, tenant["tenant_id"] if tenant else None,
+                       {"workspace_id": workspace_id, "criticality": body.criticality})
     return get_transfer(workspace_id, transfer_id)
 
 @router.get('')
@@ -78,10 +88,18 @@ def review_transfer(workspace_id: str, transfer_id: str, body: ReviewIn, user=De
         raise HTTPException(400, 'لا يمكن اعتماد نقل المعرفة بدون تحديد مستلم')
     if body.status=='approved':
         with get_db() as conn:
-            member=conn.execute('SELECT 1 FROM workspace_members WHERE workspace_id=? AND user_id=?',
-                                (workspace_id,current['successor_id'])).fetchone()
+            member=conn.execute('''SELECT 1 FROM workspace_members wm
+                JOIN workspaces w ON w.id=wm.workspace_id
+                JOIN tenant_memberships tm ON tm.tenant_id=w.tenant_id AND tm.user_id=wm.user_id
+                WHERE wm.workspace_id=? AND wm.user_id=?''',
+                (workspace_id,current['successor_id'])).fetchone()
             if not member:
                 raise HTTPException(400, 'المستلم لم يعد عضواً في مساحة العمل')
     with get_db() as conn:
         conn.execute('UPDATE knowledge_transfers SET status=?,review_note=?,reviewed_by=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND workspace_id=?', (body.status,body.review_note,user['id'],transfer_id,workspace_id))
+        tenant = conn.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+    from app.audit import record_audit_event
+    record_audit_event(user["id"], "knowledge_transfer.reviewed", "knowledge_transfer",
+                       transfer_id, tenant["tenant_id"] if tenant else None,
+                       {"workspace_id": workspace_id, "status": body.status})
     return get_transfer(workspace_id, transfer_id)
