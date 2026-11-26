@@ -49,6 +49,16 @@ def test_postgres_tenant_schema_and_authorization():
         cur.execute("INSERT INTO document_permissions(id,document_id,user_id,permission) VALUES(?,?,?,'view')",
                     (str(uuid.uuid4()), document_id, outsider_id))
 
+    audit_id = str(uuid.uuid4())
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO audit_events(id,tenant_id,actor_id,action,resource_type,resource_id,details_json) VALUES(?,?,?,?,?,?,?)",
+            (audit_id, tenant_id, owner_id, "test.append", "workspace", workspace_id, "{}"),
+        )
+    with pytest.raises(Exception):
+        with get_db() as conn:
+            conn.execute("UPDATE audit_events SET action='tampered' WHERE id=?", (audit_id,))
+
     require_workspace_role(workspace_id, owner_id, Role.OWNER)
     with pytest.raises(HTTPException) as exc:
         check_document_access(document_id, outsider_id, "view")
