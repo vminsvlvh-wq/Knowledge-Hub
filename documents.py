@@ -111,6 +111,12 @@ def create_document(workspace_id: str, doc_in: DocumentCreate, current_user: dic
 
     # Auto-index into vector store
     index_document(doc_id, workspace_id, doc_in.content or "")
+    from app.audit import record_audit_event
+    with get_db() as conn:
+        tenant = conn.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+    record_audit_event(user_id, "document.created", "document", doc_id,
+                       tenant["tenant_id"] if tenant else None,
+                       {"workspace_id": workspace_id, "content_type": doc_in.content_type or "markdown"})
     return row
 
 @router.get("/workspaces/{workspace_id}/documents", response_model=List[DocumentNode])
@@ -132,6 +138,9 @@ def list_workspace_documents_tree(workspace_id: str, current_user: dict = Depend
 def get_document(id: str, current_user: dict = Depends(get_current_user)):
     doc = check_document_access(id, current_user["id"], required_permission="view")
     doc["is_archived"] = bool(doc["is_archived"])
+    from app.audit import record_audit_event
+    record_audit_event(current_user["id"], "document.read", "document", id,
+                       doc.get("tenant_id"), {"workspace_id": doc["workspace_id"]})
     return doc
 
 @router.put("/documents/{id}", response_model=DocumentOut)
@@ -169,19 +178,29 @@ def update_document(id: str, doc_update: DocumentUpdate, current_user: dict = De
     # Update AI vector index if content changed
     if doc_update.content is not None:
         index_document(id, doc["workspace_id"], new_content)
+    from app.audit import record_audit_event
+    record_audit_event(user_id, "document.updated", "document", id,
+                       doc.get("tenant_id"), {"workspace_id": doc["workspace_id"],
+                       "content_changed": doc_update.content is not None})
 
     return res
 
 @router.delete("/documents/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def archive_document(id: str, current_user: dict = Depends(get_current_user)):
-    check_document_access(id, current_user["id"], required_permission="edit")
+    doc = check_document_access(id, current_user["id"], required_permission="edit")
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("UPDATE documents SET is_archived = 1 WHERE id = ?", (id,))
+    from app.audit import record_audit_event
+    record_audit_event(current_user["id"], "document.archived", "document", id,
+                       doc.get("tenant_id"), {"workspace_id": doc["workspace_id"]})
 
 @router.get("/documents/{id}/versions", response_model=List[DocumentVersionOut])
 def get_document_versions(id: str, current_user: dict = Depends(get_current_user)):
-    check_document_access(id, current_user["id"], required_permission="view")
+    doc = check_document_access(id, current_user["id"], required_permission="view")
+    from app.audit import record_audit_event
+    record_audit_event(current_user["id"], "document.versions_read", "document", id,
+                       doc.get("tenant_id"), {"workspace_id": doc["workspace_id"]})
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -233,6 +252,9 @@ def assign_document_permission(id: str, perm_in: DocumentPermissionAdd, current_
             ON CONFLICT(document_id, user_id) DO UPDATE SET permission = excluded.permission
         """, (perm_id, id, target_uid, perm_val))
         
+    from app.audit import record_audit_event
+    record_audit_event(current_user["id"], "document.permission_changed", "document", id,
+                       tenant_row["tenant_id"], {"target_user_id": target_uid, "permission": perm_val})
     return {"message": "تم تعيين الصلاحية بنجاح", "document_id": id, "user_id": target_uid, "permission": perm_val}
 
 # --- AI & RAG Endpoints ---
@@ -253,6 +275,11 @@ def workspace_semantic_search(
         top_k=req.top_k
     )
     
+    from app.audit import record_audit_event
+    with get_db() as conn:
+        tenant = conn.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+    record_audit_event(current_user["id"], "ai.semantic_search", "workspace", workspace_id,
+                       tenant["tenant_id"] if tenant else None, {"result_count": len(results)})
     return {
         "query": req.query,
         "total_results": len(results),
@@ -275,6 +302,12 @@ def workspace_rag_ask(
         top_k=req.top_k
     )
     
+    from app.audit import record_audit_event
+    with get_db() as conn:
+        tenant = conn.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+    record_audit_event(current_user["id"], "ai.rag_ask", "workspace", workspace_id,
+                       tenant["tenant_id"] if tenant else None,
+                       {"retrieved_chunks_count": rag_result.get("retrieved_chunks_count", 0)})
     return rag_result
 
 @router.post("/documents/{document_id}/ai/summarize", response_model=AISummarizeResponse)
@@ -284,6 +317,9 @@ def document_ai_summarize(
 ):
     doc = check_document_access(document_id, current_user["id"], required_permission="view")
     summary_data = summarize_document(doc["title"], doc["content"] or "")
+    from app.audit import record_audit_event
+    record_audit_event(current_user["id"], "ai.document_summary", "document", document_id,
+                       doc.get("tenant_id"), {"workspace_id": doc["workspace_id"]})
     
     return {
         "document_id": document_id,
