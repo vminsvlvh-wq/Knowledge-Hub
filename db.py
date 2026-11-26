@@ -268,7 +268,7 @@ def init_db(db_path: str = None):
     # Keep direct init_db() callers (tests, scripts and local setup) schema-safe.
     # Import lazily to avoid the db <-> migrations module import cycle.
     from app.migrations import run_migrations
-    run_migrations()
+    run_migrations(db_path)
 
 
 
