@@ -154,6 +154,8 @@ def list_workspace_members(id: str, current_user: dict = Depends(get_current_use
             SELECT wm.id, wm.workspace_id, wm.user_id, wm.role, wm.joined_at, u.email, u.full_name
             FROM workspace_members wm
             JOIN users u ON wm.user_id = u.id
+            JOIN workspaces w ON w.id = wm.workspace_id
+            JOIN tenant_memberships tm ON tm.tenant_id = w.tenant_id AND tm.user_id = wm.user_id
             WHERE wm.workspace_id = ?
             ORDER BY wm.joined_at ASC
         """, (id,))
@@ -176,12 +178,19 @@ def update_member_role(
         if not target_mem:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="العضو غير موجود في مساحة العمل")
         
-        # Only Owner can demote an Owner or grant Owner role
+        # Only an Owner can promote/demote another Owner.
         if (target_mem["role"] == Role.OWNER.value or new_role == Role.OWNER.value) and current_mem["role"] != Role.OWNER.value:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="فقط مالك مساحة العمل يمكنه تعديل صلاحيات المالك"
             )
+        if target_mem["role"] == Role.OWNER.value and new_role != Role.OWNER.value:
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM workspace_members WHERE workspace_id = ? AND role = 'owner'",
+                (id,)
+            )
+            if cursor.fetchone()["count"] <= 1:
+                raise HTTPException(status_code=400, detail="لا يمكن تخفيض صلاحية المالك الوحيد")
             
         cursor.execute(
             "UPDATE workspace_members SET role = ? WHERE workspace_id = ? AND user_id = ?",
