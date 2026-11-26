@@ -127,6 +127,33 @@ def add_tenant_member(tenant_id: str, payload: TenantMemberAdd, user=Depends(get
                        tenant_id, {"role": "member"})
     return {"tenant_id": tenant_id, "user_id": target["id"], "email": target["email"], "role": "member"}
 
+@router.get("/{tenant_id}/audit-events")
+def list_tenant_audit_events(
+    tenant_id: str, limit: int = 100, offset: int = 0, user=Depends(get_current_user)
+):
+    if limit < 1 or limit > 200 or offset < 0:
+        raise HTTPException(status_code=400, detail="قيم pagination غير صالحة")
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT role FROM tenant_memberships WHERE tenant_id=? AND user_id=?",
+                    (tenant_id, user["id"]))
+        actor = cur.fetchone()
+        if not actor or actor["role"] not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="سجل التدقيق متاح لمالك أو مدير المؤسسة فقط")
+        rows = cur.execute(
+            """SELECT id, actor_id, action, resource_type, resource_id, details_json, created_at
+               FROM audit_events WHERE tenant_id=?
+               ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?""",
+            (tenant_id, limit, offset),
+        ).fetchall()
+    import json
+    return [{
+        "id": row["id"], "actor_id": row["actor_id"], "action": row["action"],
+        "resource_type": row["resource_type"], "resource_id": row["resource_id"],
+        "details": json.loads(row["details_json"] or "{}"), "created_at": row["created_at"],
+    } for row in rows]
+
+
 @router.post("/{tenant_id}/workspaces/{workspace_id}")
 def attach_workspace_to_tenant(tenant_id: str, workspace_id: str, user=Depends(get_current_user)):
     with get_db() as conn:
