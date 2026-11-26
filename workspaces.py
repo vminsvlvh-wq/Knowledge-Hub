@@ -33,7 +33,7 @@ def create_workspace(ws_in: WorkspaceCreate, current_user: dict = Depends(get_cu
         )
         # Each newly created workspace starts in its own isolated tenant.
         tenant_id = str(uuid.uuid4())
-        tenant_slug = ("ws-" + slug_clean)[:80]
+        tenant_slug = ("ws-" + slug_clean[:60] + "-" + ws_id.replace("-", "")[:8])[:80]
         cursor.execute("INSERT INTO tenants (id, name, slug, created_by) VALUES (?, ?, ?, ?)",
                        (tenant_id, ws_in.name.strip(), tenant_slug, user_id))
         cursor.execute("UPDATE workspaces SET tenant_id = ? WHERE id = ?", (tenant_id, ws_id))
