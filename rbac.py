@@ -20,10 +20,13 @@ ROLE_WEIGHTS = {
 def get_workspace_membership(workspace_id: str, user_id: str) -> dict:
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, workspace_id, user_id, role, joined_at FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
-            (workspace_id, user_id)
-        )
+        cursor.execute("""
+            SELECT wm.id, wm.workspace_id, wm.user_id, wm.role, wm.joined_at
+            FROM workspace_members wm
+            JOIN workspaces w ON w.id = wm.workspace_id
+            JOIN tenant_memberships tm ON tm.tenant_id = w.tenant_id AND tm.user_id = wm.user_id
+            WHERE wm.workspace_id = ? AND wm.user_id = ?
+        """, (workspace_id, user_id))
         row = cursor.fetchone()
         if not row:
             raise HTTPException(
@@ -51,7 +54,11 @@ def check_document_access(document_id: str, user_id: str, required_permission: s
     with get_db() as conn:
         cursor = conn.cursor()
         # Fetch document and workspace
-        cursor.execute("SELECT * FROM documents WHERE id = ?", (document_id,))
+        cursor.execute("""
+            SELECT d.*, w.tenant_id
+            FROM documents d JOIN workspaces w ON w.id = d.workspace_id
+            WHERE d.id = ?
+        """, (document_id,))
         doc = cursor.fetchone()
         if not doc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="المستند غير موجود")
@@ -59,7 +66,16 @@ def check_document_access(document_id: str, user_id: str, required_permission: s
         
         workspace_id = doc_dict["workspace_id"]
         
-        # Check workspace membership
+        # Tenant membership is a mandatory boundary, including direct document grants.
+        cursor.execute(
+            "SELECT id FROM tenant_memberships WHERE tenant_id = ? AND user_id = ?",
+            (doc_dict["tenant_id"], user_id)
+        )
+        tenant_mem = cursor.fetchone()
+        if not tenant_mem:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail="ليس لديك عضوية في المؤسسة المالكة لهذا المستند")
+
         cursor.execute(
             "SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
             (workspace_id, user_id)
