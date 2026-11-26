@@ -23,6 +23,16 @@ def init_tenant_schema():
             created_by TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE CASCADE
         )""")
+        cur.execute("""CREATE TABLE IF NOT EXISTS audit_events (
+            id TEXT PRIMARY KEY, tenant_id TEXT, actor_id TEXT NOT NULL,
+            action TEXT NOT NULL, resource_type TEXT NOT NULL, resource_id TEXT NOT NULL,
+            details_json TEXT NOT NULL DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE SET NULL,
+            FOREIGN KEY(actor_id) REFERENCES users(id) ON DELETE RESTRICT
+        )""")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_tenant_created ON audit_events(tenant_id, created_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_resource ON audit_events(resource_type, resource_id, created_at)")
         cur.execute("""CREATE TABLE IF NOT EXISTS tenant_memberships (
             id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL,
             role TEXT NOT NULL CHECK(role IN ('owner','admin','member')),
@@ -80,6 +90,9 @@ def create_tenant(payload: TenantCreate, user=Depends(get_current_user)):
                     (tenant_id, payload.name.strip(), slug, user["id"]))
         cur.execute("INSERT INTO tenant_memberships(id,tenant_id,user_id,role) VALUES(?,?,?,'owner')",
                     (str(uuid.uuid4()), tenant_id, user["id"]))
+    from app.audit import record_audit_event
+    record_audit_event(user["id"], "tenant.created", "tenant", tenant_id, tenant_id,
+                       {"slug": slug})
     return {"id": tenant_id, "name": payload.name.strip(), "slug": slug, "role": "owner"}
 
 @router.get("")
@@ -109,6 +122,9 @@ def add_tenant_member(tenant_id: str, payload: TenantMemberAdd, user=Depends(get
         cur.execute("""INSERT INTO tenant_memberships(id,tenant_id,user_id,role)
                        VALUES(?,?,?,'member') ON CONFLICT(tenant_id,user_id) DO NOTHING""",
                     (str(uuid.uuid4()), tenant_id, target["id"]))
+    from app.audit import record_audit_event
+    record_audit_event(user["id"], "tenant.member_added", "tenant_member", target["id"],
+                       tenant_id, {"role": "member"})
     return {"tenant_id": tenant_id, "user_id": target["id"], "email": target["email"], "role": "member"}
 
 @router.post("/{tenant_id}/workspaces/{workspace_id}")
@@ -144,5 +160,9 @@ def attach_workspace_to_tenant(tenant_id: str, workspace_id: str, user=Depends(g
         missing = cur.fetchone()["missing"]
         if missing:
             raise HTTPException(status_code=409, detail="أضف جميع أعضاء مساحة العمل إلى المؤسسة أولاً")
+        previous_tenant_id = workspace["tenant_id"]
         cur.execute("UPDATE workspaces SET tenant_id=? WHERE id=?", (tenant_id, workspace_id))
+    from app.audit import record_audit_event
+    record_audit_event(user["id"], "workspace.tenant_attached", "workspace", workspace_id,
+                       tenant_id, {"previous_tenant_id": previous_tenant_id})
     return {"tenant_id": tenant_id, "workspace_id": workspace_id, "status": "attached"}
