@@ -123,13 +123,7 @@ def delete_requirement(workspace_id: str, requirement_id: str, user=Depends(get_
 def my_profile(workspace_id: str, user=Depends(get_current_user)):
     require_workspace_role(workspace_id, user['id'], Role.VIEWER)
     with get_db() as conn:
-        result = _get_profile(conn, workspace_id, user['id'])
-    with get_db() as conn:
-        tenant = conn.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
-    from app.audit import record_audit_event
-    record_audit_event(user["id"], "skills.self_profile_updated", "workspace", workspace_id,
-                       tenant["tenant_id"] if tenant else None, {"skill_count": len(body.skills)})
-    return result
+        return _get_profile(conn, workspace_id, user['id'])
 
 
 @router.put('/my-profile')
@@ -152,7 +146,13 @@ def save_profile(workspace_id: str, body: MyProfileIn, user=Depends(get_current_
               VALUES (?,?,?,?,?,?)''',
               (str(uuid.uuid4()), workspace_id, user['id'], skill.skill_name,
                skill.level, skill.evidence_note))
-        return _get_profile(conn, workspace_id, user['id'])
+        result = _get_profile(conn, workspace_id, user['id'])
+    with get_db() as conn:
+        tenant = conn.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+    from app.audit import record_audit_event
+    record_audit_event(user["id"], "skills.self_profile_updated", "workspace", workspace_id,
+                       tenant["tenant_id"] if tenant else None, {"skill_count": len(body.skills)})
+    return result
 
 
 @router.get('/my-gap')
