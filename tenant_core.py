@@ -1,4 +1,5 @@
 import uuid
+import os
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from app.auth import get_current_user
@@ -30,12 +31,15 @@ def init_tenant_schema():
             FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
             FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
-        try:
-            cur.execute("ALTER TABLE workspaces ADD COLUMN tenant_id TEXT")
-        except Exception as exc:
-            # SQLite and PostgreSQL both report an error when the column already exists.
-            if "duplicate column" not in str(exc).lower() and "already exists" not in str(exc).lower():
-                raise
+        if os.getenv("DATABASE_URL", "").strip():
+            # PostgreSQL supports IF NOT EXISTS; avoid swallowing SQL errors because
+            # PostgreSQL marks the whole transaction failed after a DDL exception.
+            cur.execute("ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS tenant_id TEXT")
+        else:
+            cur.execute("PRAGMA table_info(workspaces)")
+            columns = {row["name"] for row in cur.fetchall()}
+            if "tenant_id" not in columns:
+                cur.execute("ALTER TABLE workspaces ADD COLUMN tenant_id TEXT")
         cur.execute("SELECT id, name, slug, created_by, tenant_id FROM workspaces")
         for ws in cur.fetchall():
             if ws["tenant_id"]:
@@ -116,11 +120,18 @@ def attach_workspace_to_tenant(tenant_id: str, workspace_id: str, user=Depends(g
         workspace_actor = cur.fetchone()
         if not workspace_actor or workspace_actor["role"] not in ("owner", "admin"):
             raise HTTPException(status_code=403, detail="يجب أن تكون مالكاً أو مديراً لمساحة العمل")
-        cur.execute("""SELECT COUNT(*) AS missing FROM workspace_members wm
+        cur.execute("""SELECT COUNT(*) AS missing FROM (
+                           SELECT wm.user_id FROM workspace_members wm
+                           WHERE wm.workspace_id=?
+                           UNION
+                           SELECT dp.user_id FROM documents d
+                           JOIN document_permissions dp ON dp.document_id=d.id
+                           WHERE d.workspace_id=?
+                       ) required_users
                        LEFT JOIN tenant_memberships tm
-                         ON tm.tenant_id=? AND tm.user_id=wm.user_id
-                       WHERE wm.workspace_id=? AND tm.user_id IS NULL""",
-                    (tenant_id, workspace_id))
+                         ON tm.tenant_id=? AND tm.user_id=required_users.user_id
+                       WHERE tm.user_id IS NULL""",
+                    (workspace_id, workspace_id, tenant_id))
         missing = cur.fetchone()["missing"]
         if missing:
             raise HTTPException(status_code=409, detail="أضف جميع أعضاء مساحة العمل إلى المؤسسة أولاً")
