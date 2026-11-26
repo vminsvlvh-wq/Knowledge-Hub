@@ -49,7 +49,10 @@ def create_workspace(ws_in: WorkspaceCreate, current_user: dict = Depends(get_cu
         cursor.execute("SELECT * FROM workspaces WHERE id = ?", (ws_id,))
         row = dict(cursor.fetchone())
         row["current_user_role"] = Role.OWNER.value
-        return row
+    from app.audit import record_audit_event
+    record_audit_event(user_id, "workspace.created", "workspace", ws_id, tenant_id,
+                       {"slug": slug_clean})
+    return row
 
 @router.get("", response_model=List[WorkspaceOut])
 def list_my_workspaces(current_user: dict = Depends(get_current_user)):
