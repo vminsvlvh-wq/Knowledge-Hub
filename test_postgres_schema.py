@@ -11,7 +11,11 @@ from app.rbac import Role, require_workspace_role, check_document_access
 @pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="PostgreSQL integration test only")
 def test_postgres_tenant_schema_and_authorization():
     init_db()
-    init_tenant_schema()
+    migration_result = init_tenant_schema()
+    assert migration_result["applied"] in ([], [1, 2])
+    with get_db() as conn:
+        versions = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
+        assert [row["version"] for row in versions] == [1, 2]
 
     owner_id, outsider_id = str(uuid.uuid4()), str(uuid.uuid4())
     workspace_id, document_id = str(uuid.uuid4()), str(uuid.uuid4())
