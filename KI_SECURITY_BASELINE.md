@@ -11,6 +11,14 @@
 - PostgreSQL column migration uses ADD COLUMN IF NOT EXISTS; SQLite checks schema metadata before altering.
 - Production configuration requires an explicitly provided 32+ character JWT secret. The built-in development secret is not suitable for production.
 
+## Additional controls added in the security hardening pass
+- Application-level append-only audit event writer and tenant-scoped audit event table.
+- Tenant owners/admins can read only their own tenant's audit history, with bounded pagination.
+- Audit metadata is recorded for tenant creation/invitations, workspace membership changes, document reads/writes/archives/permission changes, and AI search/ask/summary operations. Document bodies, prompts, tokens and secrets are not copied into audit metadata.
+- Workspace discovery now requires a matching tenant membership; workspace role changes validate the role and only an existing workspace owner may appoint, demote or remove another owner.
+- Collaborative WebSocket content updates reject non-string payloads and content larger than 2 MB.
+- Semantic-search document allow-list lookup independently joins the tenant membership boundary.
+
 ## Automated coverage added
 - Legacy workspace backfill and separation.
 - Idempotent tenant bootstrap.
@@ -27,7 +35,11 @@
 5. Add malware scanning, parser isolation, upload size/type controls and retention/deletion workflows.
 6. Add database migration tooling with versioned and reversible migrations.
 7. Run dependency, secret, SAST, DAST and independent penetration testing.
+8. Add versioned/reversible schema migrations; current tenant schema setup is additive bootstrap DDL, not a migration framework.
+9. Implement tenant-scoped object storage only after selecting a provider; this repository currently has no object-storage service or upload/download pipeline.
 8. Verify backup/restore, encryption, key rotation, SSO and deployment hardening for both SaaS and Private modes.
 
 ## Release decision
+Audit events are application-level append-only records; database administrators can still alter them, and tamper-evident external log export is not yet implemented.
+
 This is a foundational security improvement, not a production security sign-off, certification or legal compliance assessment. Keep the pull request unmerged until CI passes and the remaining controls are reviewed.
