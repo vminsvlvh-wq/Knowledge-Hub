@@ -46,5 +46,22 @@ Audit basis: source files reviewed on 2026-11-26 through the connected GitHub re
 5. Build a small, testable ingestion to retrieval to cited-answer vertical slice.
 6. Run security and functional tests before deployment.
 
+## Follow-up audit — 2026-11-26
+
+### Implemented during the hardening pass
+- Workspace list and semantic-search allow-list lookups now require tenant membership in their own SQL joins.
+- Workspace role changes reject unknown roles; only workspace owners may grant, demote or remove another owner.
+- Tenant-scoped audit event storage and a bounded owner/admin read API were added.
+- Audit events cover tenant creation/invitations, workspace membership changes, document reads and lifecycle/permission changes, and AI retrieval/summary actions.
+- WebSocket content updates now enforce a 2 MB text limit and reject non-string content.
+
+### Remaining P0/P1 release gates
+- Add a versioned, reversible migration framework; bootstrap DDL is not a substitute.
+- No object storage, upload/download endpoints, malware scanning or parser sandbox currently exist. Do not onboard customer files until these are designed and tested.
+- Audit events are not yet tamper-evident or exported to an independent log sink.
+- WebSocket query-string JWT transport remains a credential-exposure risk in access logs; migrate to a safer handshake mechanism supported by the deployment stack.
+- The workflow still runs a focused KI security suite, not the complete legacy application regression suite.
+- No independent penetration test, dependency/SAST/DAST review, backup/restore exercise or production configuration verification has been performed.
+
 ## Important limitations
 The source review did not execute the application, run the test suite, inspect deployed environment variables, or verify production infrastructure. Findings above are prioritized engineering observations, not a certification or guarantee that no other issues exist.
