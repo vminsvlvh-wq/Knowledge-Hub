@@ -41,10 +41,12 @@ def get_user_accessible_document_ids(workspace_id: str, user_id: str) -> List[st
     """
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
-            (workspace_id, user_id)
-        )
+        cursor.execute("""
+            SELECT wm.role FROM workspace_members wm
+            JOIN workspaces w ON w.id = wm.workspace_id
+            JOIN tenant_memberships tm ON tm.tenant_id = w.tenant_id AND tm.user_id = wm.user_id
+            WHERE wm.workspace_id = ? AND wm.user_id = ?
+        """, (workspace_id, user_id))
         mem = cursor.fetchone()
         if not mem:
             return []
