@@ -30,7 +30,7 @@ def on_startup():
 from fastapi.responses import HTMLResponse
 import os
 
-STATIC_INDEX_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "index.html")
+STATIC_INDEX_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
 
 @app.get("/", response_class=HTMLResponse, tags=["الواجهة الأمامية (Frontend Web App)"])
 def serve_frontend():
