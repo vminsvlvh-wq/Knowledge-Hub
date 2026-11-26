@@ -193,6 +193,15 @@ class TestKnowledgeManagementBackend(unittest.TestCase):
                 viewer_init = ws_viewer.receive_text()
                 self.assertEqual(json.loads(viewer_init)["type"], "init")
 
+                # Read-only members must not be able to send document changes.
+                ws_viewer.send_text(json.dumps({
+                    "type": "content_update",
+                    "content": "viewer change attempt"
+                }))
+                denied = json.loads(ws_viewer.receive_text())
+                self.assertEqual(denied["type"], "error")
+                self.assertEqual(denied["detail"], "edit permission required")
+
                 joined_event = ws_editor.receive_text()
                 self.assertEqual(json.loads(joined_event)["type"], "presence:joined")
 
