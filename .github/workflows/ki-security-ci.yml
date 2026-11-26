@@ -3,10 +3,12 @@ name: KI Security and Test Suite
 on:
   push:
     branches: [ki-foundation]
+  pull_request:
+    branches: [main]
 
 concurrency:
   group: ki-security-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   sqlite:
