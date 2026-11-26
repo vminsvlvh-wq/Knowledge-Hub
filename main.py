@@ -3,7 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.db import init_db
-from app.tenant_core import init_tenant_schema, router as tenants_router
+from app.migrations import run_migrations
+from app.tenant_core import router as tenants_router
 from app import auth, workspaces, documents, collaboration, decisions, knowledge_transfer, skills
 
 app = FastAPI(
@@ -25,7 +26,7 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup():
     init_db()
-    init_tenant_schema()
+    run_migrations()
 
 from fastapi.responses import HTMLResponse
 import os
