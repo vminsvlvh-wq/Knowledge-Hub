@@ -3,7 +3,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.config import settings
-from app.db import get_db, init_db
+from app.db import get_db, init_db, index_document, semantic_search
 from app.tenant_core import init_tenant_schema
 
 
@@ -126,3 +126,42 @@ def test_workspace_role_requires_tenant_membership(tmp_path, monkeypatch):
     with pytest.raises(HTTPException) as exc:
         require_workspace_role(workspace_id, outsider_id, Role.GUEST)
     assert exc.value.status_code == 403
+
+
+
+def test_vector_rows_are_tenant_scoped_and_fail_closed(tmp_path, monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    db_file = str(tmp_path / "tenant_vectors.db")
+    monkeypatch.setattr(settings, "DB_PATH", db_file)
+    init_db(db_file)
+
+    owner_id, workspace_id, document_id = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
+    with get_db(db_file) as conn:
+        cur = conn.cursor()
+        cur.execute("INSERT INTO users(id,email,full_name,hashed_password) VALUES(?,?,?,?)",
+                    (owner_id, "vector-owner@tenant.test", "Owner", "hash"))
+        cur.execute("INSERT INTO workspaces(id,name,slug,created_by) VALUES(?,?,?,?)",
+                    (workspace_id, "Vector Workspace", "vector-workspace", owner_id))
+        cur.execute("INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'owner')",
+                    (str(uuid.uuid4()), workspace_id, owner_id))
+    init_tenant_schema()
+
+    with get_db(db_file) as conn:
+        cur = conn.cursor()
+        cur.execute("INSERT INTO documents(id,workspace_id,title,content,created_by) VALUES(?,?,?,?,?)",
+                    (document_id, workspace_id, "Access policy", "annual leave request policy", owner_id))
+        cur.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,))
+        tenant_id = cur.fetchone()["tenant_id"]
+
+    index_document(document_id, workspace_id, "annual leave request policy")
+    results = semantic_search(workspace_id, "annual leave request", [document_id])
+    assert results
+    with get_db(db_file) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT tenant_id FROM document_chunks WHERE document_id=?", (document_id,))
+        assert all(row["tenant_id"] == tenant_id for row in cur.fetchall())
+        cur.execute("UPDATE document_chunks SET tenant_id=? WHERE document_id=?",
+                    (str(uuid.uuid4()), document_id))
+
+    # A row whose tenant metadata does not match its owning workspace is never returned.
+    assert semantic_search(workspace_id, "annual leave request", [document_id]) == []
