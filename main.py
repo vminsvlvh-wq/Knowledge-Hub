@@ -56,9 +56,14 @@ def ready():
     try:
         with get_db() as conn:
             conn.execute("SELECT 1").fetchone()
+            migration = conn.execute("SELECT MAX(version) AS version FROM schema_migrations").fetchone()
+            if not migration or (migration["version"] or 0) < 3:
+                raise HTTPException(status_code=503, detail="Database migrations incomplete")
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=503, detail="Database unavailable")
-    return {"status": "ready"}
+    return {"status": "ready", "schema_version": 3}
 
 # Mount routers
 app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
