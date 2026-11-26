@@ -177,6 +177,7 @@ def init_db(db_path: str = None):
             id TEXT PRIMARY KEY,
             document_id TEXT NOT NULL,
             workspace_id TEXT NOT NULL,
+            tenant_id TEXT,
             chunk_index INTEGER NOT NULL,
             content TEXT NOT NULL,
             embedding BYTEA NOT NULL,
@@ -185,6 +186,14 @@ def init_db(db_path: str = None):
             FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
         );
         """).replace("BYTEA", "BYTEA" if postgres else "BLOB"))
+
+        if postgres:
+            cursor.execute("ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS tenant_id TEXT")
+        else:
+            cursor.execute("PRAGMA table_info(document_chunks)")
+            chunk_columns = {row["name"] for row in cursor.fetchall()}
+            if "tenant_id" not in chunk_columns:
+                cursor.execute("ALTER TABLE document_chunks ADD COLUMN tenant_id TEXT")
 
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_workspace ON document_chunks(workspace_id);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc ON document_chunks(document_id);")
@@ -384,9 +393,14 @@ def index_document(document_id: str, workspace_id: str, content: str):
     chunks = chunk_text(content)
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT title FROM documents WHERE id = ?", (document_id,))
+        cursor.execute("""SELECT d.title, w.tenant_id
+                          FROM documents d JOIN workspaces w ON w.id=d.workspace_id
+                          WHERE d.id=? AND d.workspace_id=?""", (document_id, workspace_id))
         row = cursor.fetchone()
-        doc_title = row["title"] if row else ""
+        if not row or not row["tenant_id"]:
+            raise ValueError("Cannot index a document without a valid tenant boundary")
+        doc_title = row["title"]
+        tenant_id = row["tenant_id"]
         
         cursor.execute("DELETE FROM document_chunks WHERE document_id = ?", (document_id,))
         for idx, chunk in enumerate(chunks):
@@ -395,9 +409,9 @@ def index_document(document_id: str, workspace_id: str, content: str):
             emb = get_embedding(embed_input)
             emb_blob = emb.tobytes()
             cursor.execute("""
-                INSERT INTO document_chunks (id, document_id, workspace_id, chunk_index, content, embedding)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (chunk_id, document_id, workspace_id, idx, chunk, emb_blob))
+                INSERT INTO document_chunks (id, document_id, workspace_id, tenant_id, chunk_index, content, embedding)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (chunk_id, document_id, workspace_id, tenant_id, idx, chunk, emb_blob))
 
 def semantic_search(
     workspace_id: str,
@@ -410,15 +424,21 @@ def semantic_search(
         
     query_vec = get_embedding(query)
     placeholders = ",".join(["?"] * len(allowed_document_ids))
-    sql = f"""
-        SELECT c.id, c.document_id, c.chunk_index, c.content, c.embedding, d.title as doc_title
-        FROM document_chunks c
-        JOIN documents d ON c.document_id = d.id
-        WHERE c.workspace_id = ? AND c.document_id IN ({placeholders}) AND d.is_archived = 0
-    """
-    params = [workspace_id] + allowed_document_ids
     with get_db() as conn:
         cursor = conn.cursor()
+        cursor.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,))
+        workspace = cursor.fetchone()
+        if not workspace or not workspace["tenant_id"]:
+            return []
+        tenant_id = workspace["tenant_id"]
+        sql = f"""
+            SELECT c.id, c.document_id, c.chunk_index, c.content, c.embedding, d.title as doc_title
+            FROM document_chunks c
+            JOIN documents d ON c.document_id = d.id AND d.workspace_id = c.workspace_id
+            WHERE c.workspace_id = ? AND c.tenant_id = ?
+              AND c.document_id IN ({placeholders}) AND d.is_archived = 0
+        """
+        params = [workspace_id, tenant_id] + allowed_document_ids
         cursor.execute(sql, params)
         rows = cursor.fetchall()
         
