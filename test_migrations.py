@@ -39,7 +39,7 @@ def test_versioned_migrations_backfill_legacy_workspaces_and_vectors(tmp_path, m
 
     first = run_migrations()
     second = run_migrations()
-    assert first["applied"] == [1, 2]
+    assert first["applied"] == [1, 2, 3]
     assert second["applied"] == []
 
     with get_db(db_file) as conn:
@@ -65,5 +65,6 @@ def test_versioned_migrations_backfill_legacy_workspaces_and_vectors(tmp_path, m
             "SELECT version,name FROM schema_migrations ORDER BY version"
         ).fetchall()
         assert [(row["version"], row["name"]) for row in versions] == [
-            (1, "tenant_foundation"), (2, "tenant_audit_events")
+            (1, "tenant_foundation"), (2, "tenant_audit_events"),
+            (3, "append_only_audit_guards")
         ]
