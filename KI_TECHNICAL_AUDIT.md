@@ -61,9 +61,9 @@ Audit basis: source files reviewed on 2026-11-26 through the connected GitHub re
 ### Remaining P0/P1 release gates
 - A versioned, transactional migration runner now records schema versions and performs tenant membership/vector backfills plus audit-event schema creation. Migrations are additive; down-migrations/automated rollback scripts are not yet provided.
 - No object storage, upload/download endpoints, malware scanning or parser sandbox currently exist. Do not onboard customer files until these are designed and tested.
-- Audit events cover tenant, workspace membership, document, AI, skills, decision and knowledge-transfer operations. They remain application-level records and are not yet tamper-evident or exported to an independent log sink.
+- Audit events cover tenant, workspace, document, AI, skills, decision and knowledge-transfer operations. Database triggers now reject application-level UPDATE/DELETE on audit rows in SQLite and PostgreSQL. A database owner/superuser can still alter schema or disable triggers; independent tamper-evident export remains a release gate.
 - WebSocket JWTs are no longer accepted in query strings. Realtime authentication now uses a same-origin HttpOnly cookie and validates the Origin against configured origins or the request host.
-- The CI workflow is being expanded to run the full repository test suite on SQLite plus focused PostgreSQL schema/isolation integration tests; verify the latest run before release.
+- CI runs the complete repository test suite on SQLite plus PostgreSQL migration/schema/isolation integration tests; verify the latest run before release.
 - No independent penetration test, dependency/SAST/DAST review, backup/restore exercise or production configuration verification has been performed.
 
 ## Important limitations
