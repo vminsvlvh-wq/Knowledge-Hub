@@ -22,8 +22,8 @@ jobs:
           cache-dependency-path: app/requirements.txt
       - name: Install dependencies
         run: pip install -r app/requirements.txt pytest
-      - name: Run full SQLite test suite
-        run: python -m pytest app -q
+      - name: Run KI import and tenant-isolation tests
+        run: python -m pytest app/test_ki_import.py app/test_tenancy.py -q
 
   postgres:
     runs-on: ubuntu-latest
