@@ -36,3 +36,8 @@ See:
 - [Target architecture](KI_ARCHITECTURE.md)
 - [Technical audit](KI_TECHNICAL_AUDIT.md)
 - [Security baseline](KI_SECURITY_BASELINE.md)
+
+
+## Security engineering
+- [Security baseline](KI_SECURITY_BASELINE.md)
+- [Storage isolation review](KI_STORAGE_ISOLATION.md)
