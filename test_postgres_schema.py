@@ -12,10 +12,10 @@ from app.rbac import Role, require_workspace_role, check_document_access
 def test_postgres_tenant_schema_and_authorization():
     init_db()
     migration_result = init_tenant_schema()
-    assert migration_result["applied"] in ([], [1, 2])
+    assert migration_result["applied"] in ([], [1, 2, 3])
     with get_db() as conn:
         versions = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
-        assert [row["version"] for row in versions] == [1, 2]
+        assert [row["version"] for row in versions] == [1, 2, 3]
 
     owner_id, outsider_id = str(uuid.uuid4()), str(uuid.uuid4())
     workspace_id, document_id = str(uuid.uuid4()), str(uuid.uuid4())
