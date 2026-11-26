@@ -138,7 +138,12 @@ def add_workspace_member(id: str, member_in: WorkspaceMemberAdd, current_user: d
             JOIN users u ON wm.user_id = u.id
             WHERE wm.id = ?
         """, (new_member_id,))
-        return dict(cursor.fetchone())
+        result = dict(cursor.fetchone())
+        tenant_id = tenant_row["tenant_id"] if tenant_row else None
+    from app.audit import record_audit_event
+    record_audit_event(current_user["id"], "workspace.member_added", "workspace", id,
+                       tenant_id, {"target_user_id": target_user_id, "role": role_requested})
+    return result
 
 @router.get("/{id}/members", response_model=List[WorkspaceMemberOut])
 def list_workspace_members(id: str, current_user: dict = Depends(get_current_user)):
@@ -189,7 +194,13 @@ def update_member_role(
             JOIN users u ON wm.user_id = u.id
             WHERE wm.workspace_id = ? AND wm.user_id = ?
         """, (id, user_id))
-        return dict(cursor.fetchone())
+        result = dict(cursor.fetchone())
+        tenant_row = cursor.execute("SELECT tenant_id FROM workspaces WHERE id=?", (id,)).fetchone()
+    from app.audit import record_audit_event
+    record_audit_event(current_user["id"], "workspace.member_role_changed", "workspace", id,
+                       tenant_row["tenant_id"] if tenant_row else None,
+                       {"target_user_id": user_id, "new_role": new_role})
+    return result
 
 @router.delete("/{id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_member(id: str, user_id: str, current_user: dict = Depends(get_current_user)):
@@ -217,3 +228,8 @@ def remove_member(id: str, user_id: str, current_user: dict = Depends(get_curren
                 )
                 
         cursor.execute("DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?", (id, user_id))
+        tenant_row = cursor.execute("SELECT tenant_id FROM workspaces WHERE id=?", (id,)).fetchone()
+    from app.audit import record_audit_event
+    record_audit_event(current_user["id"], "workspace.member_removed", "workspace", id,
+                       tenant_row["tenant_id"] if tenant_row else None,
+                       {"target_user_id": user_id})
