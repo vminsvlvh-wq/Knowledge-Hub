@@ -180,6 +180,8 @@ class TestKnowledgeManagementBackend(unittest.TestCase):
         self.assertEqual(versions_resp.json()[0]["version_number"], 2)
 
     def test_05_websocket_collaboration(self):
+        # Use explicit per-user cookies, not the last HTTP login cookie in TestClient.
+        self.client.cookies.clear()
         ws_editor_url = f"/ws/documents/{self.child_doc_id}"
         with self.client.websocket_connect(ws_editor_url, headers={"Origin": "http://testserver", "Cookie": f"ki_access_token={self.editor_token}"}) as ws_editor:
             init_msg = ws_editor.receive_text()
