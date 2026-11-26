@@ -65,6 +65,9 @@ class TestKnowledgeManagementBackend(unittest.TestCase):
         resp_health = self.client.get("/api/health")
         self.assertEqual(resp_health.status_code, 200)
         self.assertEqual(resp_health.json()["status"], "online")
+        resp_ready = self.client.get("/api/ready")
+        self.assertEqual(resp_ready.status_code, 200)
+        self.assertEqual(resp_ready.json()["schema_version"], 3)
 
     def test_02_login_and_me(self):
         resp = self.client.post("/api/v1/auth/login", json={
