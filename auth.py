@@ -126,8 +126,13 @@ def login(login_in: UserLogin, response: Response):
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(response: Response):
-    response.delete_cookie("ki_access_token", path="/", httponly=True, samesite="lax")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    import os
+    response.delete_cookie(
+        "ki_access_token", path="/", httponly=True, samesite="lax",
+        secure=os.getenv("ENVIRONMENT", "development").lower() == "production",
+    )
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
 
 
 @router.get("/me", response_model=UserOut)
