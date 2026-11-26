@@ -50,6 +50,10 @@ def create_decision(workspace_id: str, body: DecisionIn, user=Depends(get_curren
     decision_id=str(uuid.uuid4())
     with get_db() as conn:
         conn.execute("INSERT INTO decisions(id,workspace_id,title,problem,rationale,alternatives,owner_id) VALUES (?,?,?,?,?,?,?)",(decision_id,workspace_id,body.title,body.problem,body.rationale,body.alternatives,user["id"]))
+        tenant = conn.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+    from app.audit import record_audit_event
+    record_audit_event(user["id"], "decision.created", "decision", decision_id,
+                       tenant["tenant_id"] if tenant else None, {"workspace_id": workspace_id})
     return ensure_decision(workspace_id,decision_id)
 
 @router.get("")
@@ -64,6 +68,10 @@ def update_status(workspace_id: str,decision_id: str,body: StatusIn,user=Depends
     ensure_decision(workspace_id,decision_id)
     with get_db() as conn:
         conn.execute("UPDATE decisions SET status=? WHERE id=? AND workspace_id=?",(body.status,decision_id,workspace_id))
+        tenant = conn.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+    from app.audit import record_audit_event
+    record_audit_event(user["id"], "decision.status_changed", "decision", decision_id,
+                       tenant["tenant_id"] if tenant else None, {"status": body.status})
     return ensure_decision(workspace_id,decision_id)
 
 @router.post("/{decision_id}/metrics",status_code=201)
@@ -73,6 +81,10 @@ def create_metric(workspace_id: str,decision_id: str,body: MetricIn,user=Depends
     metric_id=str(uuid.uuid4())
     with get_db() as conn:
         conn.execute("INSERT INTO decision_metrics(id,decision_id,metric_name,unit,direction,baseline,target) VALUES(?,?,?,?,?,?,?)",(metric_id,decision_id,body.metric_name,body.unit,body.direction,body.baseline,body.target))
+        tenant = conn.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+    from app.audit import record_audit_event
+    record_audit_event(user["id"], "decision.metric_created", "decision", decision_id,
+                       tenant["tenant_id"] if tenant else None, {"metric_id": metric_id})
     return ensure_metric(workspace_id,decision_id,metric_id)
 
 @router.post("/{decision_id}/metrics/{metric_id}/measurements",status_code=201)
@@ -82,6 +94,10 @@ def add_measurement(workspace_id: str,decision_id: str,metric_id: str,body: Meas
     measurement_id=str(uuid.uuid4())
     with get_db() as conn:
         conn.execute("INSERT INTO decision_measurements(id,metric_id,value,note,recorded_by) VALUES(?,?,?,?,?)",(measurement_id,metric_id,body.value,body.note,user["id"]))
+        tenant = conn.execute("SELECT w.tenant_id FROM workspaces w JOIN decisions d ON d.workspace_id=w.id WHERE d.id=?", (decision_id,)).fetchone()
+    from app.audit import record_audit_event
+    record_audit_event(user["id"], "decision.measurement_recorded", "decision", decision_id,
+                       tenant["tenant_id"] if tenant else None, {"metric_id": metric_id})
     return {"id":measurement_id,"metric_id":metric_id,"value":body.value,"note":body.note}
 
 @router.get("/{decision_id}/impact")
