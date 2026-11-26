@@ -58,12 +58,6 @@ def create_transfer(workspace_id: str, body: TransferIn, user=Depends(get_curren
     record_audit_event(user["id"], "knowledge_transfer.created", "knowledge_transfer",
                        transfer_id, tenant["tenant_id"] if tenant else None,
                        {"workspace_id": workspace_id, "criticality": body.criticality})
-    with get_db() as conn:
-        tenant = conn.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
-    from app.audit import record_audit_event
-    record_audit_event(user["id"], "knowledge_transfer.reviewed", "knowledge_transfer",
-                       transfer_id, tenant["tenant_id"] if tenant else None,
-                       {"workspace_id": workspace_id, "status": body.status})
     return get_transfer(workspace_id, transfer_id)
 
 @router.get('')
@@ -103,4 +97,9 @@ def review_transfer(workspace_id: str, transfer_id: str, body: ReviewIn, user=De
                 raise HTTPException(400, 'المستلم لم يعد عضواً في مساحة العمل')
     with get_db() as conn:
         conn.execute('UPDATE knowledge_transfers SET status=?,review_note=?,reviewed_by=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND workspace_id=?', (body.status,body.review_note,user['id'],transfer_id,workspace_id))
+        tenant = conn.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+    from app.audit import record_audit_event
+    record_audit_event(user["id"], "knowledge_transfer.reviewed", "knowledge_transfer",
+                       transfer_id, tenant["tenant_id"] if tenant else None,
+                       {"workspace_id": workspace_id, "status": body.status})
     return get_transfer(workspace_id, transfer_id)
