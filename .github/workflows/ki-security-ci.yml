@@ -9,6 +9,8 @@ on:
 jobs:
   sqlite:
     runs-on: ubuntu-latest
+    env:
+      ENVIRONMENT: test
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,7 +22,7 @@ jobs:
           cache-dependency-path: app/requirements.txt
       - name: Install dependencies
         run: pip install -r app/requirements.txt pytest
-      - name: Run SQLite test suite
+      - name: Run full SQLite test suite
         run: python -m pytest app -q
 
   postgres:
@@ -53,5 +55,5 @@ jobs:
           cache-dependency-path: app/requirements.txt
       - name: Install dependencies
         run: pip install -r app/requirements.txt pytest
-      - name: Run PostgreSQL test suite
-        run: python -m pytest app -q
+      - name: Run PostgreSQL tenant integration test
+        run: python -m pytest app/test_postgres_schema.py -q
