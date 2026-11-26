@@ -118,6 +118,10 @@ def test_workspace_role_requires_tenant_membership(tmp_path, monkeypatch):
         cur.execute("INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'owner')",
                     (str(uuid.uuid4()), workspace_id, owner_id))
     init_tenant_schema()
+    # Simulate a stale/incorrect workspace grant without corresponding tenant membership.
+    with get_db(db_file) as conn:
+        conn.execute("INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'viewer')",
+                     (str(uuid.uuid4()), workspace_id, outsider_id))
     from app.rbac import Role, require_workspace_role
     with pytest.raises(HTTPException) as exc:
         require_workspace_role(workspace_id, outsider_id, Role.GUEST)
