@@ -41,6 +41,9 @@ def test_http_only_cookie_authenticates_websocket_and_query_token_is_rejected(tm
         ) as socket:
             assert socket.receive_json()["type"] == "init"
 
+        # The HTTP client retains login cookies; remove it so this request proves
+        # that a query-string token alone is rejected.
+        client.cookies.delete("ki_access_token")
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(
                 f"/ws/documents/{document_id}?token={token}",
