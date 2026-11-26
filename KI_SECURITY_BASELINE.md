@@ -19,6 +19,13 @@
 - Collaborative WebSocket content updates reject non-string payloads and content larger than 2 MB.
 - Semantic-search document allow-list lookup independently joins the tenant membership boundary.
 
+## Additional hardening completed
+- Tenant schema and audit-event changes are now applied through versioned, transactional migrations recorded in `schema_migrations`.
+- Realtime WebSocket authentication uses an HttpOnly cookie and same-origin Origin validation; URL query-string bearer tokens are rejected.
+- Decision tracking, skills profile/requirements, and knowledge-transfer creation/review operations now emit audit metadata.
+- Knowledge-transfer source and successor references are checked against document permissions and current tenant membership.
+- Skills aggregate reports exclude stale memberships from another tenant boundary.
+
 ## Automated coverage added
 - Legacy workspace backfill and separation.
 - Idempotent tenant bootstrap.
