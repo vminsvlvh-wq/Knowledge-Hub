@@ -1,8 +1,54 @@
 import uuid
+from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi.security import OAuth2PasswordBearer
+from jose import jwt, JWTError
+from passlib.context import CryptContext
+from app.config import settings
 from app.db import get_db
-from app.auth import hash_password, verify_password, create_access_token, get_current_user
 from app.schemas import UserCreate, UserLogin, TokenResponse, UserOut
+
+_password_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+_oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_PREFIX}/auth/login")
+
+def hash_password(password: str) -> str:
+    return _password_context.hash(password)
+
+def verify_password(password: str, hashed_password: str) -> bool:
+    return _password_context.verify(password, hashed_password)
+
+def create_access_token(data: dict) -> str:
+    if not settings.JWT_SECRET_KEY:
+        raise RuntimeError("JWT_SECRET_KEY must be configured before issuing tokens")
+    payload = data.copy()
+    payload["exp"] = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+def decode_access_token(token: str) -> dict:
+    if not settings.JWT_SECRET_KEY:
+        raise RuntimeError("JWT_SECRET_KEY is not configured")
+    return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+
+def get_current_user(token: str = Depends(_oauth2_scheme)) -> dict:
+    credentials_error = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="بيانات المصادقة غير صالحة أو منتهية",
+        headers={"WWW-Authenticate": "Bearer"}
+    )
+    try:
+        payload = decode_access_token(token)
+        user_id = payload.get("sub")
+        if not user_id:
+            raise credentials_error
+    except (JWTError, RuntimeError, TypeError, ValueError):
+        raise credentials_error
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id,email,full_name,created_at FROM users WHERE id=?", (user_id,))
+        user = cursor.fetchone()
+    if not user:
+        raise credentials_error
+    return dict(user)
 
 router = APIRouter(prefix="/auth", tags=["المصادقة والمستخدمين (Auth)"])
 
