@@ -216,6 +216,16 @@ def assign_document_permission(id: str, perm_in: DocumentPermissionAdd, current_
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="المستخدم المحدد غير موجود")
         
         target_uid = target_user["id"]
+        # Explicit document grants must also establish tenant membership.
+        cursor.execute("""SELECT w.tenant_id FROM documents d
+                          JOIN workspaces w ON w.id=d.workspace_id WHERE d.id=?""", (id,))
+        tenant_row = cursor.fetchone()
+        if not tenant_row or not tenant_row["tenant_id"]:
+            raise HTTPException(status_code=409, detail="المستند غير مرتبط بمؤسسة")
+        cursor.execute("""INSERT INTO tenant_memberships(id,tenant_id,user_id,role)
+                          VALUES(?,?,?,'member')
+                          ON CONFLICT(tenant_id,user_id) DO NOTHING""",
+                       (str(uuid.uuid4()), tenant_row["tenant_id"], target_uid))
         perm_id = str(uuid.uuid4())
         cursor.execute("""
             INSERT INTO document_permissions (id, document_id, user_id, permission)
