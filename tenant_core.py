@@ -58,6 +58,15 @@ def init_tenant_schema():
                                VALUES(?,?,?,'member') ON CONFLICT(tenant_id,user_id) DO NOTHING""",
                             (str(uuid.uuid4()), tenant_id, member["user_id"]))
 
+        # Backfill pre-existing vector rows after all legacy workspaces have tenants.
+        cur.execute("""UPDATE document_chunks
+                       SET tenant_id=(SELECT w.tenant_id FROM workspaces w
+                                      WHERE w.id=document_chunks.workspace_id)
+                       WHERE tenant_id IS NULL
+                         AND EXISTS (SELECT 1 FROM workspaces w
+                                     WHERE w.id=document_chunks.workspace_id
+                                       AND w.tenant_id IS NOT NULL)""")
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_tenant(payload: TenantCreate, user=Depends(get_current_user)):
     tenant_id = str(uuid.uuid4())
