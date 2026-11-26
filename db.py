@@ -265,6 +265,11 @@ def init_db(db_path: str = None):
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_docs_workspace ON documents(workspace_id);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_docs_parent ON documents(parent_id);")
 
+    # Keep direct init_db() callers (tests, scripts and local setup) schema-safe.
+    # Import lazily to avoid the db <-> migrations module import cycle.
+    from app.migrations import run_migrations
+    run_migrations()
+
 
 
 # =====================================================================
