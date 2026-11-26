@@ -10,6 +10,9 @@ class TenantCreate(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     slug: str = Field(min_length=2, max_length=80, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9-]*$")
 
+class TenantMemberAdd(BaseModel):
+    email: str = Field(min_length=5, max_length=254)
+
 def init_tenant_schema():
     """Additive, idempotent bootstrap migration. Existing workspaces are isolated individually."""
     with get_db() as conn:
@@ -74,3 +77,52 @@ def list_my_tenants(user=Depends(get_current_user)):
                        FROM tenants t JOIN tenant_memberships tm ON tm.tenant_id=t.id
                        WHERE tm.user_id=? ORDER BY t.created_at DESC""", (user["id"],))
         return [dict(row) for row in cur.fetchall()]
+
+
+@router.post("/{tenant_id}/members", status_code=status.HTTP_201_CREATED)
+def add_tenant_member(tenant_id: str, payload: TenantMemberAdd, user=Depends(get_current_user)):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT role FROM tenant_memberships WHERE tenant_id=? AND user_id=?",
+                    (tenant_id, user["id"]))
+        actor = cur.fetchone()
+        if not actor or actor["role"] not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="صلاحية مالك أو مدير المؤسسة مطلوبة")
+        cur.execute("SELECT id,email,full_name FROM users WHERE email=?",
+                    (payload.email.lower().strip(),))
+        target = cur.fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="المستخدم غير مسجل في النظام")
+        cur.execute("""INSERT INTO tenant_memberships(id,tenant_id,user_id,role)
+                       VALUES(?,?,?,'member') ON CONFLICT(tenant_id,user_id) DO NOTHING""",
+                    (str(uuid.uuid4()), tenant_id, target["id"]))
+    return {"tenant_id": tenant_id, "user_id": target["id"], "email": target["email"], "role": "member"}
+
+@router.post("/{tenant_id}/workspaces/{workspace_id}")
+def attach_workspace_to_tenant(tenant_id: str, workspace_id: str, user=Depends(get_current_user)):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT role FROM tenant_memberships WHERE tenant_id=? AND user_id=?",
+                    (tenant_id, user["id"]))
+        actor = cur.fetchone()
+        if not actor or actor["role"] not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="صلاحية مدير المؤسسة مطلوبة")
+        cur.execute("SELECT id,tenant_id FROM workspaces WHERE id=?", (workspace_id,))
+        workspace = cur.fetchone()
+        if not workspace:
+            raise HTTPException(status_code=404, detail="مساحة العمل غير موجودة")
+        cur.execute("SELECT role FROM workspace_members WHERE workspace_id=? AND user_id=?",
+                    (workspace_id, user["id"]))
+        workspace_actor = cur.fetchone()
+        if not workspace_actor or workspace_actor["role"] not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="يجب أن تكون مالكاً أو مديراً لمساحة العمل")
+        cur.execute("""SELECT COUNT(*) AS missing FROM workspace_members wm
+                       LEFT JOIN tenant_memberships tm
+                         ON tm.tenant_id=? AND tm.user_id=wm.user_id
+                       WHERE wm.workspace_id=? AND tm.user_id IS NULL""",
+                    (tenant_id, workspace_id))
+        missing = cur.fetchone()["missing"]
+        if missing:
+            raise HTTPException(status_code=409, detail="أضف جميع أعضاء مساحة العمل إلى المؤسسة أولاً")
+        cur.execute("UPDATE workspaces SET tenant_id=? WHERE id=?", (tenant_id, workspace_id))
+    return {"tenant_id": tenant_id, "workspace_id": workspace_id, "status": "attached"}
