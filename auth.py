@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Response
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from passlib.context import CryptContext
@@ -52,8 +52,18 @@ def get_current_user(token: str = Depends(_oauth2_scheme)) -> dict:
 
 router = APIRouter(prefix="/auth", tags=["المصادقة والمستخدمين (Auth)"])
 
+def _set_auth_cookie(response: Response, token: str):
+    import os
+    response.set_cookie(
+        key="ki_access_token", value=token, httponly=True,
+        secure=os.getenv("ENVIRONMENT", "development").lower() == "production",
+        samesite="lax", path="/",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+
+
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-def register(user_in: UserCreate):
+def register(user_in: UserCreate, response: Response):
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM users WHERE email = ?", (user_in.email.lower().strip(),))
@@ -77,6 +87,7 @@ def register(user_in: UserCreate):
         user_dict = dict(row)
         
     token = create_access_token({"sub": user_id, "email": email_clean})
+    _set_auth_cookie(response, token)
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -84,7 +95,7 @@ def register(user_in: UserCreate):
     }
 
 @router.post("/login", response_model=TokenResponse)
-def login(login_in: UserLogin):
+def login(login_in: UserLogin, response: Response):
     email_clean = login_in.email.lower().strip()
     with get_db() as conn:
         cursor = conn.cursor()
@@ -106,11 +117,18 @@ def login(login_in: UserLogin):
         }
     
     token = create_access_token({"sub": user_dict["id"], "email": email_clean})
+    _set_auth_cookie(response, token)
     return {
         "access_token": token,
         "token_type": "bearer",
         "user": user_dict
     }
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(response: Response):
+    response.delete_cookie("ki_access_token", path="/", httponly=True, samesite="lax")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
 
 @router.get("/me", response_model=UserOut)
 def get_me(current_user: dict = Depends(get_current_user)):
