@@ -29,7 +29,7 @@ Before introducing attachments or external object storage:
 
 ## Realtime and audit metadata
 
-WebSocket access now uses an HttpOnly `ki_access_token` cookie, validates the Origin against configured origins or the request host, and rejects query-string JWTs. This is intended for same-origin browser use. Audit events record operational metadata, not document bodies or secrets; they are not cryptographically tamper-evident.
+WebSocket access now uses an HttpOnly `ki_access_token` cookie, validates the Origin against configured origins or the request host, and rejects query-string JWTs. This is intended for same-origin browser use. Audit events record operational metadata, not document bodies or secrets. Database triggers reject ordinary UPDATE/DELETE operations; a privileged database owner can still disable triggers, so independent tamper-evident export remains a future control.
 
 ## Release status
 
