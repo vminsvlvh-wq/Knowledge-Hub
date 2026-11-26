@@ -35,3 +35,4 @@ See:
 - [Product brief](KI_PRODUCT_BRIEF.md)
 - [Target architecture](KI_ARCHITECTURE.md)
 - [Technical audit](KI_TECHNICAL_AUDIT.md)
+- [Security baseline](KI_SECURITY_BASELINE.md)
