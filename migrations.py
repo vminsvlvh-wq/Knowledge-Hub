@@ -123,8 +123,8 @@ MIGRATIONS = [
 ]
 
 
-def run_migrations():
-    with get_db() as conn:
+def run_migrations(db_path: str = None):
+    with get_db(db_path) as conn:
         conn.execute("""CREATE TABLE IF NOT EXISTS schema_migrations (
             version INTEGER PRIMARY KEY, name TEXT NOT NULL,
             applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
