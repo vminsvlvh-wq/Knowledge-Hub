@@ -1,0 +1,56 @@
+import uuid
+
+from app.config import settings
+from app.db import get_db, init_db
+from app.tenant_core import init_tenant_schema
+
+
+def test_legacy_workspaces_are_backfilled_into_separate_tenants(tmp_path, monkeypatch):
+    db_file = str(tmp_path / "tenancy.db")
+    monkeypatch.setattr(settings, "DB_PATH", db_file)
+    init_db(db_file)
+
+    user_a, user_b = str(uuid.uuid4()), str(uuid.uuid4())
+    ws_a, ws_b = str(uuid.uuid4()), str(uuid.uuid4())
+    with get_db(db_file) as conn:
+        cur = conn.cursor()
+        cur.execute("INSERT INTO users(id,email,full_name,hashed_password) VALUES(?,?,?,?)",
+                    (user_a, "a@example.test", "A", "hash"))
+        cur.execute("INSERT INTO users(id,email,full_name,hashed_password) VALUES(?,?,?,?)",
+                    (user_b, "b@example.test", "B", "hash"))
+        cur.execute("INSERT INTO workspaces(id,name,slug,created_by) VALUES(?,?,?,?)",
+                    (ws_a, "Org A", "org-a", user_a))
+        cur.execute("INSERT INTO workspaces(id,name,slug,created_by) VALUES(?,?,?,?)",
+                    (ws_b, "Org B", "org-b", user_b))
+        cur.execute("INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'owner')",
+                    (str(uuid.uuid4()), ws_a, user_a))
+        cur.execute("INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'owner')",
+                    (str(uuid.uuid4()), ws_b, user_b))
+
+    init_tenant_schema()
+
+    with get_db(db_file) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT tenant_id FROM workspaces WHERE id=?", (ws_a,))
+        tenant_a = cur.fetchone()["tenant_id"]
+        cur.execute("SELECT tenant_id FROM workspaces WHERE id=?", (ws_b,))
+        tenant_b = cur.fetchone()["tenant_id"]
+        assert tenant_a and tenant_b and tenant_a != tenant_b
+        cur.execute("SELECT COUNT(*) AS n FROM tenant_memberships WHERE tenant_id=? AND user_id=?",
+                    (tenant_a, user_a))
+        assert cur.fetchone()["n"] == 1
+        cur.execute("SELECT COUNT(*) AS n FROM tenant_memberships WHERE tenant_id=? AND user_id=?",
+                    (tenant_a, user_b))
+        assert cur.fetchone()["n"] == 0
+
+
+def test_tenant_bootstrap_is_idempotent(tmp_path, monkeypatch):
+    db_file = str(tmp_path / "tenancy_idempotent.db")
+    monkeypatch.setattr(settings, "DB_PATH", db_file)
+    init_db(db_file)
+    init_tenant_schema()
+    init_tenant_schema()
+    with get_db(db_file) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) AS n FROM tenants")
+        assert cur.fetchone()["n"] == 0
