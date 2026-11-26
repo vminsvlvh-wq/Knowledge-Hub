@@ -177,7 +177,6 @@ def init_db(db_path: str = None):
             id TEXT PRIMARY KEY,
             document_id TEXT NOT NULL,
             workspace_id TEXT NOT NULL,
-            tenant_id TEXT,
             chunk_index INTEGER NOT NULL,
             content TEXT NOT NULL,
             embedding BYTEA NOT NULL,
@@ -186,14 +185,6 @@ def init_db(db_path: str = None):
             FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
         );
         """).replace("BYTEA", "BYTEA" if postgres else "BLOB"))
-
-        if postgres:
-            cursor.execute("ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS tenant_id TEXT")
-        else:
-            cursor.execute("PRAGMA table_info(document_chunks)")
-            chunk_columns = {row["name"] for row in cursor.fetchall()}
-            if "tenant_id" not in chunk_columns:
-                cursor.execute("ALTER TABLE document_chunks ADD COLUMN tenant_id TEXT")
 
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_workspace ON document_chunks(workspace_id);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc ON document_chunks(document_id);")
@@ -273,49 +264,6 @@ def init_db(db_path: str = None):
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_members_user ON workspace_members(user_id);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_docs_workspace ON documents(workspace_id);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_docs_parent ON documents(parent_id);")
-        # Tenant foundation is part of the core schema so every supported init_db()
-        # entry point (tests, local CLI and application startup) gets the same boundary.
-        cursor.execute("""CREATE TABLE IF NOT EXISTS tenants (
-            id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT UNIQUE NOT NULL,
-            created_by TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE CASCADE
-        )""")
-        cursor.execute("""CREATE TABLE IF NOT EXISTS tenant_memberships (
-            id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('owner','admin','member')),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(tenant_id,user_id),
-            FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
-            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-        )""")
-        if postgres:
-            cursor.execute("ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS tenant_id TEXT")
-        else:
-            cursor.execute("PRAGMA table_info(workspaces)")
-            workspace_columns = {row["name"] for row in cursor.fetchall()}
-            if "tenant_id" not in workspace_columns:
-                cursor.execute("ALTER TABLE workspaces ADD COLUMN tenant_id TEXT")
-
-        cursor.execute("SELECT id,name,slug,created_by,tenant_id FROM workspaces")
-        for workspace in cursor.fetchall():
-            if workspace["tenant_id"]:
-                continue
-            tenant_id = str(uuid.uuid4())
-            tenant_slug = ("legacy-" + str(workspace["id"]).replace("-", ""))[:80]
-            cursor.execute("INSERT INTO tenants(id,name,slug,created_by) VALUES(?,?,?,?)",
-                           (tenant_id, workspace["name"], tenant_slug, workspace["created_by"]))
-            cursor.execute("UPDATE workspaces SET tenant_id=? WHERE id=?",
-                           (tenant_id, workspace["id"]))
-            cursor.execute("""INSERT INTO tenant_memberships(id,tenant_id,user_id,role)
-                              VALUES(?,?,?,'owner')""",
-                           (str(uuid.uuid4()), tenant_id, workspace["created_by"]))
-            cursor.execute("SELECT user_id FROM workspace_members WHERE workspace_id=?",
-                           (workspace["id"],))
-            for member in cursor.fetchall():
-                cursor.execute("""INSERT INTO tenant_memberships(id,tenant_id,user_id,role)
-                                  VALUES(?,?,?,'member')
-                                  ON CONFLICT(tenant_id,user_id) DO NOTHING""",
-                               (str(uuid.uuid4()), tenant_id, member["user_id"]))
 
 
 
