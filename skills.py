@@ -96,6 +96,12 @@ def upsert_requirement(workspace_id: str, body: RequirementIn, user=Depends(get_
             rid = str(uuid.uuid4())
             conn.execute('INSERT INTO role_skill_requirements (id,workspace_id,role_name,skill_name,target_level) VALUES (?,?,?,?,?)',
                          (rid, workspace_id, body.role_name, body.skill_name, body.target_level))
+    with get_db() as conn:
+        tenant = conn.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+    from app.audit import record_audit_event
+    record_audit_event(user["id"], "skills.requirement_updated", "workspace", workspace_id,
+                       tenant["tenant_id"] if tenant else None,
+                       {"role_name": body.role_name, "skill_name": body.skill_name})
     return {'id': rid, **body.model_dump()}
 
 
@@ -106,13 +112,24 @@ def delete_requirement(workspace_id: str, requirement_id: str, user=Depends(get_
         result = conn.execute('DELETE FROM role_skill_requirements WHERE workspace_id=? AND id=?', (workspace_id, requirement_id))
         if result.rowcount == 0:
             raise HTTPException(404, 'متطلب المهارة غير موجود')
+    with get_db() as conn:
+        tenant = conn.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+    from app.audit import record_audit_event
+    record_audit_event(user["id"], "skills.requirement_deleted", "workspace", workspace_id,
+                       tenant["tenant_id"] if tenant else None, {"requirement_id": requirement_id})
 
 
 @router.get('/my-profile')
 def my_profile(workspace_id: str, user=Depends(get_current_user)):
     require_workspace_role(workspace_id, user['id'], Role.VIEWER)
     with get_db() as conn:
-        return _get_profile(conn, workspace_id, user['id'])
+        result = _get_profile(conn, workspace_id, user['id'])
+    with get_db() as conn:
+        tenant = conn.execute("SELECT tenant_id FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+    from app.audit import record_audit_event
+    record_audit_event(user["id"], "skills.self_profile_updated", "workspace", workspace_id,
+                       tenant["tenant_id"] if tenant else None, {"skill_count": len(body.skills)})
+    return result
 
 
 @router.put('/my-profile')
@@ -166,9 +183,12 @@ def gap_summary(workspace_id: str, role_name: str = '', user=Depends(get_current
             roles = [r for r in roles if r == role_name]
         groups = []
         for role in roles:
-            users = conn.execute('SELECT user_id FROM skill_profiles WHERE workspace_id=? AND role_name=? '
-                                 'AND user_id IN (SELECT user_id FROM workspace_members WHERE workspace_id=?)',
-                                 (workspace_id,role,workspace_id)).fetchall()
+            users = conn.execute('''SELECT sp.user_id FROM skill_profiles sp
+                 JOIN workspace_members wm ON wm.workspace_id=sp.workspace_id AND wm.user_id=sp.user_id
+                 JOIN workspaces w ON w.id=wm.workspace_id
+                 JOIN tenant_memberships tm ON tm.tenant_id=w.tenant_id AND tm.user_id=sp.user_id
+                 WHERE sp.workspace_id=? AND sp.role_name=?''',
+                 (workspace_id,role)).fetchall()
             n = len(users)
             if n < MIN_AGGREGATE_GROUP:
                 groups.append({'role_name':role,'suppressed':True,'reason':'insufficient_group_size',
