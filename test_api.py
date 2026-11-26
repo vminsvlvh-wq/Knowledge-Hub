@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import settings
 from app.db import init_db
+from app.migrations import run_migrations
 from app.main import app
 from fastapi.testclient import TestClient
 
@@ -18,6 +19,7 @@ class TestKnowledgeManagementBackend(unittest.TestCase):
         cls.temp_db.close()
         settings.DB_PATH = cls.temp_db.name
         init_db(cls.temp_db.name)
+        run_migrations()
         cls.client = TestClient(app)
 
         # 1. Register Users at setup
