@@ -137,6 +137,12 @@ async def collaborative_editing_ws(
 
             # B. Content edits / delta broadcasting
             elif event_type == "content_update":
+                # A read-only collaborator must never be able to mutate document state.
+                try:
+                    check_document_access(document_id, user_id, required_permission="edit")
+                except Exception:
+                    await websocket.send_text(json.dumps({"type": "error", "detail": "edit permission required"}))
+                    continue
                 new_content = msg.get("content", "")
                 # Broadcast real-time update to all collaborators
                 await collab_manager.broadcast(document_id, {
@@ -156,6 +162,11 @@ async def collaborative_editing_ws(
 
             # C. Save Version Snapshot
             elif event_type == "save_snapshot":
+                try:
+                    check_document_access(document_id, user_id, required_permission="edit")
+                except Exception:
+                    await websocket.send_text(json.dumps({"type": "error", "detail": "edit permission required"}))
+                    continue
                 summary = msg.get("summary", "حفظ تلقائي للنسخة")
                 content_to_save = msg.get("content")
                 with get_db() as conn:
