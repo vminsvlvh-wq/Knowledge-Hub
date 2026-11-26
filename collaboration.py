@@ -144,6 +144,9 @@ async def collaborative_editing_ws(
                     await websocket.send_text(json.dumps({"type": "error", "detail": "edit permission required"}))
                     continue
                 new_content = msg.get("content", "")
+                if not isinstance(new_content, str) or len(new_content) > 2_000_000:
+                    await websocket.send_text(json.dumps({"type": "error", "detail": "invalid content or payload too large"}))
+                    continue
                 # Broadcast real-time update to all collaborators
                 await collab_manager.broadcast(document_id, {
                     "type": "content_updated",
