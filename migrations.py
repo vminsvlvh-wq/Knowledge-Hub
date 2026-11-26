@@ -98,7 +98,7 @@ def _migration_3_append_only_audit(conn):
             BEGIN
                 RAISE EXCEPTION 'audit_events is append-only';
             END;
-            $""")
+            $$""")
         conn.execute("DROP TRIGGER IF EXISTS trg_audit_events_no_update ON audit_events")
         conn.execute("DROP TRIGGER IF EXISTS trg_audit_events_no_delete ON audit_events")
         conn.execute("""CREATE TRIGGER trg_audit_events_no_update
