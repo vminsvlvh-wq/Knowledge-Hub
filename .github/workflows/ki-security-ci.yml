@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r app/requirements.txt pytest
       - name: Run KI import and tenant-isolation tests
-        run: python -m pytest app/test_ki_import.py app/test_tenancy.py -q
+        run: python -m pytest app/test_ki_import.py app/test_tenancy.py app/test_audit.py -q
 
   postgres:
     runs-on: ubuntu-latest
