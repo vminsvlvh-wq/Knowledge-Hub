@@ -94,8 +94,11 @@ def review_transfer(workspace_id: str, transfer_id: str, body: ReviewIn, user=De
         raise HTTPException(400, 'لا يمكن اعتماد نقل المعرفة بدون تحديد مستلم')
     if body.status=='approved':
         with get_db() as conn:
-            member=conn.execute('SELECT 1 FROM workspace_members WHERE workspace_id=? AND user_id=?',
-                                (workspace_id,current['successor_id'])).fetchone()
+            member=conn.execute('''SELECT 1 FROM workspace_members wm
+                JOIN workspaces w ON w.id=wm.workspace_id
+                JOIN tenant_memberships tm ON tm.tenant_id=w.tenant_id AND tm.user_id=wm.user_id
+                WHERE wm.workspace_id=? AND wm.user_id=?''',
+                (workspace_id,current['successor_id'])).fetchone()
             if not member:
                 raise HTTPException(400, 'المستلم لم يعد عضواً في مساحة العمل')
     with get_db() as conn:
