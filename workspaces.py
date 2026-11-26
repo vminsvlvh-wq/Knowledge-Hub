@@ -60,6 +60,7 @@ def list_my_workspaces(current_user: dict = Depends(get_current_user)):
             SELECT w.*, wm.role as current_user_role
             FROM workspaces w
             INNER JOIN workspace_members wm ON w.id = wm.workspace_id
+            INNER JOIN tenant_memberships tm ON tm.tenant_id = w.tenant_id AND tm.user_id = wm.user_id
             WHERE wm.user_id = ?
             ORDER BY w.created_at DESC
         """, (user_id,))
@@ -81,8 +82,8 @@ def get_workspace(id: str, current_user: dict = Depends(get_current_user)):
 
 @router.post("/{id}/members", response_model=WorkspaceMemberOut, status_code=status.HTTP_201_CREATED)
 def add_workspace_member(id: str, member_in: WorkspaceMemberAdd, current_user: dict = Depends(get_current_user)):
-    # Requires ADMIN or OWNER role
-    require_workspace_role(id, current_user["id"], Role.ADMIN)
+    # Requires ADMIN or OWNER role. Only an OWNER may appoint another OWNER.
+    actor = require_workspace_role(id, current_user["id"], Role.ADMIN)
     
     role_requested = member_in.role.lower().strip()
     valid_roles = [r.value for r in Role]
@@ -91,6 +92,8 @@ def add_workspace_member(id: str, member_in: WorkspaceMemberAdd, current_user: d
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"الدور غير صالح. الأدوار المتاحة: {', '.join(valid_roles)}"
         )
+    if role_requested == Role.OWNER.value and actor["role"] != Role.OWNER.value:
+        raise HTTPException(status_code=403, detail="فقط مالك مساحة العمل يمكنه تعيين مالك آخر")
     
     with get_db() as conn:
         cursor = conn.cursor()
@@ -157,6 +160,9 @@ def update_member_role(
 ):
     current_mem = require_workspace_role(id, current_user["id"], Role.ADMIN)
     new_role = role_update.role.lower().strip()
+    valid_roles = {r.value for r in Role}
+    if new_role not in valid_roles:
+        raise HTTPException(status_code=400, detail="الدور المحدد غير صالح")
     
     with get_db() as conn:
         cursor = conn.cursor()
@@ -196,6 +202,8 @@ def remove_member(id: str, user_id: str, current_user: dict = Depends(get_curren
         if not target_mem:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="العضو غير موجود في مساحة العمل")
         
+        if target_mem["role"] == Role.OWNER.value and current_mem["role"] != Role.OWNER.value:
+            raise HTTPException(status_code=403, detail="فقط مالك مساحة العمل يمكنه إزالة مالك آخر")
         if target_mem["role"] == Role.OWNER.value:
             # Check if there are other owners
             cursor.execute(
