@@ -91,9 +91,35 @@ def _migration_2_audit_events(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_resource ON audit_events(resource_type,resource_id,created_at)")
 
 
+def _migration_3_append_only_audit(conn):
+    if hasattr(conn, "_conn"):
+        conn.execute("""CREATE OR REPLACE FUNCTION ki_reject_audit_mutation()
+            RETURNS trigger LANGUAGE plpgsql AS $
+            BEGIN
+                RAISE EXCEPTION 'audit_events is append-only';
+            END;
+            $""")
+        conn.execute("DROP TRIGGER IF EXISTS trg_audit_events_no_update ON audit_events")
+        conn.execute("DROP TRIGGER IF EXISTS trg_audit_events_no_delete ON audit_events")
+        conn.execute("""CREATE TRIGGER trg_audit_events_no_update
+            BEFORE UPDATE ON audit_events FOR EACH ROW EXECUTE FUNCTION ki_reject_audit_mutation()""")
+        conn.execute("""CREATE TRIGGER trg_audit_events_no_delete
+            BEFORE DELETE ON audit_events FOR EACH ROW EXECUTE FUNCTION ki_reject_audit_mutation()""")
+    else:
+        conn.execute("""CREATE TRIGGER IF NOT EXISTS trg_audit_events_no_update
+            BEFORE UPDATE ON audit_events BEGIN
+                SELECT RAISE(ABORT, 'audit_events is append-only');
+            END""")
+        conn.execute("""CREATE TRIGGER IF NOT EXISTS trg_audit_events_no_delete
+            BEFORE DELETE ON audit_events BEGIN
+                SELECT RAISE(ABORT, 'audit_events is append-only');
+            END""")
+
+
 MIGRATIONS = [
     (1, "tenant_foundation", _migration_1_tenant_foundation),
     (2, "tenant_audit_events", _migration_2_audit_events),
+    (3, "append_only_audit_guards", _migration_3_append_only_audit),
 ]
 
 
